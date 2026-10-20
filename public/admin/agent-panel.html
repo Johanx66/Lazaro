@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Panel de Agente - Conversaciones en espera</title>
+    <link rel="stylesheet" href="/admin/admin.css" />
+    <style>
+      .conversation-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .conversation-item {
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 12px;
+        margin-bottom: 8px;
+        background: #fff;
+      }
+      .conversation-item.waiting-agent {
+        border-left: 4px solid #f59e0b;
+      }
+      .conversation-item.assigned {
+        border-left: 4px solid #3b82f6;
+      }
+      .conversation-item.closed {
+        border-left: 4px solid #9ca3af;
+      }
+      .conversation-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .conversation-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .conversation-meta {
+        font-size: 0.85rem;
+        color: #666;
+      }
+      .status-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .status-waiting-agent {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .status-open {
+        background: #dbeafe;
+        color: #1e40af;
+      }
+      .status-resolved {
+        background: #dcfce7;
+        color: #166534;
+      }
+      .status-closed {
+        background: #f3f4f6;
+        color: #374151;
+      }
+      .messages-container {
+        max-height: 400px;
+        overflow-y: auto;
+        border: 1px solid #eee;
+        border-radius: 4px;
+        padding: 12px;
+        background: #fafafa;
+        margin-bottom: 12px;
+      }
+      .message {
+        margin-bottom: 8px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        max-width: 85%;
+      }
+      .message.user {
+        background: #e0f2fe;
+        margin-left: auto;
+        border-bottom-right-radius: 2px;
+      }
+      .message.bot {
+        background: #f3f4f6;
+        margin-right: auto;
+        border-bottom-left-radius: 2px;
+      }
+      .message.agent {
+        background: #dcfce7;
+        margin-right: auto;
+        border-bottom-left-radius: 2px;
+      }
+      .message.system {
+        background: #fef3c7;
+        margin: 8px auto;
+        text-align: center;
+        font-size: 0.85rem;
+        color: #92400e;
+        max-width: 90%;
+      }
+      .message-sender {
+        font-weight: 600;
+        font-size: 0.75rem;
+        margin-bottom: 4px;
+        text-transform: uppercase;
+      }
+      .message-time {
+        font-size: 0.7rem;
+        color: #999;
+        margin-top: 4px;
+        text-align: right;
+      }
+      .reply-form {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .reply-form textarea {
+        flex: 1;
+        min-height: 80px;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        resize: vertical;
+      }
+      .btn-group {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .whatsapp-warning {
+        background: #fef3c7;
+        border: 1px solid #f59e0b;
+        color: #92400e;
+        padding: 12px;
+        border-radius: 4px;
+        margin-bottom: 12px;
+        display: none;
+      }
+      .whatsapp-warning.visible {
+        display: block;
+      }
+      .empty-state {
+        text-align: center;
+        color: #999;
+        padding: 40px 20px;
+      }
+      .loading {
+        text-align: center;
+        padding: 20px;
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app">
+      <section id="loginView" hidden>
+        <h1>Iniciar sesión - Panel de Agente</h1>
+        <form id="loginForm" novalidate>
+          <label>Correo electrónico
+            <input id="loginEmail" type="email" autocomplete="username" required />
+          </label>
+          <label>Contraseña
+            <input id="loginPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <div id="loginError" class="error" hidden></div>
+          <button type="submit" id="loginSubmit">Entrar</button>
+        </form>
+      </section>
+
+      <section id="panelView" hidden>
+        <header>
+          <h1>Panel de Agente</h1>
+          <span id="userInfo"></span>
+          <button type="button" id="logoutBtn" class="secondary">Cerrar sesión</button>
+        </header>
+
+        <div id="panelError" class="error" hidden></div>
+
+        <div id="waitingListContainer">
+          <h2>Conversaciones en espera / asignadas</h2>
+          <button type="button" id="refreshBtn" class="secondary">Actualizar</button>
+          <button type="button" id="historyBtn" class="secondary">Ver historial</button>
+          <div id="loadingWaiting" class="loading" hidden>Cargando...</div>
+          <ul id="waitingList" class="conversation-list"></ul>
+          <div id="emptyWaiting" class="empty-state" hidden>No hay conversaciones en espera ni asignadas.</div>
+        </div>
+
+        <div id="historyListContainer" hidden>
+          <h2>Historial de conversaciones cerradas</h2>
+          <button type="button" id="refreshHistoryBtn" class="secondary">Actualizar</button>
+          <button type="button" id="backToWaitingBtn" class="secondary">← Volver a en espera</button>
+          <div id="loadingHistory" class="loading" hidden>Cargando...</div>
+          <ul id="historyList" class="conversation-list"></ul>
+          <div id="emptyHistory" class="empty-state" hidden>No hay conversaciones cerradas.</div>
+        </div>
+
+        <div id="conversationDetail" hidden>
+          <div class="row">
+            <button type="button" id="backBtn" class="secondary">← Volver a la lista</button>
+            <h2 id="conversationTitle"></h2>
+          </div>
+          <div id="conversationMeta" class="conversation-meta"></div>
+          <div id="whatsappWarning" class="whatsapp-warning">
+            ⚠️ Esta conversación es por WhatsApp. La ventana de 24h para responder libremente 
+            <span id="whatsappWindowStatus"></span>.
+            <span id="whatsappWindowAction"></span>
+          </div>
+          <div id="messagesContainer" class="messages-container"></div>
+          <form id="replyForm" class="reply-form">
+            <textarea id="replyText" placeholder="Escribe tu respuesta..." required></textarea>
+            <button type="submit" id="sendReplyBtn">Enviar</button>
+          </form>
+          <div class="btn-group">
+            <button type="button" id="closeConversationBtn" class="secondary">Cerrar conversación</button>
+            <button type="button" id="returnToBotBtn" class="secondary">Devolver al bot</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/admin/agent-panel.js" defer></script>
+  </body>
+</html>

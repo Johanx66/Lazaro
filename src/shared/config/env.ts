@@ -1,0 +1,79 @@
+import "dotenv/config";
+import { parseAllowedOrigins } from "./allowed-origins.js";
+import { resolveChannelMode } from "./channel-mode.js";
+import { DEFAULT_FAQ_MIN_CONFIDENCE, parseFaqMinConfidence } from "./faq-min-confidence.js";
+
+const nodeEnv = process.env.NODE_ENV ?? "development";
+const faqMinConfidence = parseFaqMinConfidence(process.env.FAQ_MIN_CONFIDENCE);
+
+const transferAfterMissesRaw = process.env.TRANSFER_AFTER_MISSES ?? "3";
+const transferAfterMisses = Number(transferAfterMissesRaw);
+
+const publicBaseUrl = (process.env.PUBLIC_BASE_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+const loginLinkTtlMinutes = Number(process.env.LOGIN_LINK_TTL_MINUTES ?? "10");
+const chatSessionIdleMinutes = Number(process.env.CHAT_SESSION_IDLE_MINUTES ?? "20");
+const chatSessionAbsoluteHours = Number(process.env.CHAT_SESSION_ABSOLUTE_HOURS ?? "8");
+const requirePhoneMatchRaw = (process.env.REQUIRE_PHONE_MATCH ?? "").trim().toLowerCase();
+const requirePhoneMatch = requirePhoneMatchRaw === "" ? nodeEnv === "production" : requirePhoneMatchRaw === "true";
+const telegramSkipPhoneMatchRaw = (process.env.TELEGRAM_SKIP_PHONE_MATCH ?? "").trim().toLowerCase();
+const telegramSkipPhoneMatch = telegramSkipPhoneMatchRaw === "true";
+const trustProxyRaw = (process.env.TRUST_PROXY ?? "").trim().toLowerCase();
+const trustProxy = trustProxyRaw === "true" || trustProxyRaw === "1";
+
+function positiveInt(raw: number, fallback: number): number {
+  return Number.isInteger(raw) && raw > 0 ? raw : fallback;
+}
+
+export const env = {
+  nodeEnv,
+  port: Number(process.env.PORT ?? 3000),
+  databaseUrl: process.env.DATABASE_URL ?? "",
+  whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
+  whatsappAppSecret: process.env.WHATSAPP_APP_SECRET ?? "",
+  whatsappAccessToken: process.env.WHATSAPP_ACCESS_TOKEN ?? "",
+  whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID ?? "",
+  botpressWebhookSecret: process.env.BOTPRESS_WEBHOOK_SECRET ?? "",
+  botpressWebhookUrl: process.env.BOTPRESS_WEBHOOK_URL ?? "",
+  whatsappSupportPhone: process.env.WHATSAPP_SUPPORT_PHONE ?? "",
+  notificationWebhookUrl: process.env.NOTIFICATION_WEBHOOK_URL ?? "",
+  // Telegram Bot API (sin credenciales => modo MOCK con log explícito).
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
+  telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? "",
+  // Solo se usan al sembrar el primer admin (prisma/seed.ts). Nunca se registran.
+  adminEmail: process.env.ADMIN_EMAIL ?? "",
+  adminPassword: process.env.ADMIN_PASSWORD ?? "",
+  // Solo se usan al sembrar un usuario de empresa de ejemplo (prisma/seed.ts). Nunca se registran.
+  companySeedUsername: process.env.COMPANY_SEED_USERNAME ?? "",
+  companySeedPassword: process.env.COMPANY_SEED_PASSWORD ?? "",
+  companySeedDisplayName: process.env.COMPANY_SEED_DISPLAY_NAME ?? "",
+  companySeedPhone: process.env.COMPANY_SEED_PHONE ?? "",
+  allowedOrigins: parseAllowedOrigins(process.env.ALLOWED_ORIGINS),
+  channelMode: resolveChannelMode(process.env.CHANNEL_MODE, nodeEnv),
+  // Un valor inválido lo reporta validateConfig; aquí se usa el valor por defecto.
+  faqMinConfidence: faqMinConfidence.ok ? faqMinConfidence.value : DEFAULT_FAQ_MIN_CONFIDENCE,
+  transferAfterMisses: Number.isFinite(transferAfterMisses) && transferAfterMisses > 0 ? Math.trunc(transferAfterMisses) : 3,
+  whatsappTemplateName: process.env.WHATSAPP_TEMPLATE_NAME ?? "",
+  // Base pública absoluta para construir el enlace de login del chat (sin barra final).
+  publicBaseUrl,
+  loginLinkTtlMinutes: positiveInt(loginLinkTtlMinutes, 10),
+  chatSessionIdleMinutes: positiveInt(chatSessionIdleMinutes, 20),
+  chatSessionAbsoluteHours: positiveInt(chatSessionAbsoluteHours, 8),
+  // Si el contacto del chat debe coincidir con el teléfono registrado del usuario.
+  requirePhoneMatch,
+  // Si true, se omite esa coincidencia cuando el canal es TELEGRAM (el contactId es
+  // un chat.id, no un teléfono). Por defecto false: la coincidencia sigue aplicando.
+  telegramSkipPhoneMatch,
+  // Confiar en X-Forwarded-For (requerido tras un proxy inverso para que el rate-limit
+  // vea la IP real). Vacío/false => no se confía (por defecto).
+  trustProxy,
+
+  // FASE 5 — IA local (Ollama). Si no responde, el bot transfiere a asesor.
+  ollamaBaseUrl: (process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/+$/, ""),
+  ollamaModel: process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct",
+  llmTimeoutMs: positiveInt(Number(process.env.LLM_TIMEOUT_MS ?? "10000"), 10000),
+
+  // FASE 5 — BD de la empresa (solo lectura). Vacío => consultas de datos deshabilitadas.
+  companyDatabaseUrl: process.env.COMPANY_DATABASE_URL ?? "",
+  companyQueryTimeoutMs: positiveInt(Number(process.env.COMPANY_QUERY_TIMEOUT_MS ?? "3000"), 3000),
+  companyMaxRows: positiveInt(Number(process.env.COMPANY_MAX_ROWS ?? "50"), 50),
+};

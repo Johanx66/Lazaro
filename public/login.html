@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Iniciar sesión</title>
+    <link rel="stylesheet" href="/login.css" />
+  </head>
+  <body>
+    <main id="app">
+      <header>
+        <h1>Acceso a tus datos</h1>
+      </header>
+
+      <section id="loadingView">
+        <p>Comprobando el enlace…</p>
+      </section>
+
+      <section id="invalidView" hidden>
+        <div id="invalidError" class="error"></div>
+        <p class="hint">Vuelve al chat y pide un nuevo enlace de acceso.</p>
+      </section>
+
+      <section id="formView" hidden>
+        <p class="hint">Contacto verificado: <strong id="maskedContact"></strong></p>
+        <form id="loginForm" novalidate>
+          <label>Usuario
+            <input id="username" type="text" autocomplete="username" maxlength="60" required />
+          </label>
+          <label>Contraseña
+            <input id="password" type="password" autocomplete="current-password" required />
+          </label>
+          <div id="formError" class="error" hidden></div>
+          <button type="submit" id="submitBtn">Entrar</button>
+        </form>
+      </section>
+
+      <section id="successView" hidden>
+        <div class="success">Sesión iniciada como <strong id="successName"></strong>.</div>
+        <p class="hint">Ya puedes volver al chat y consultar tus datos.</p>
+      </section>
+    </main>
+
+    <script src="/login.js" defer></script>
+  </body>
+</html>

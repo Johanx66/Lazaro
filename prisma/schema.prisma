@@ -1,0 +1,299 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum SenderType {
+  USER
+  BOT
+  AGENT
+  SYSTEM
+}
+
+enum ConversationStatus {
+  OPEN
+  BOT_HANDLING
+  WAITING_USER
+  WAITING_AGENT
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_USER
+  RESOLVED
+  CLOSED
+}
+
+enum AgentStatus {
+  AVAILABLE
+  BUSY
+  OFFLINE
+}
+
+enum AdminRole {
+  ADMIN
+  AGENT
+}
+
+enum CompanyRole {
+  USER
+  ADMIN
+}
+
+enum ConversationEventType {
+  CONVERSATION_CREATED
+  MESSAGE_RECEIVED
+  MESSAGE_SENT
+  BOT_RESPONSE
+  TICKET_CREATED
+  TRANSFERRED_TO_HUMAN
+  AGENT_ASSIGNED
+  CONVERSATION_RESOLVED
+  CONVERSATION_CLOSED
+}
+
+// ---------------------------------------------------------------------------
+// Modelos
+// ---------------------------------------------------------------------------
+
+model User {
+  id                 String         @id @default(cuid())
+  name               String
+  phone              String         @unique
+  email              String?        @unique
+  externalCustomerId String
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  conversations Conversation[]
+  tickets       Ticket[]
+
+  @@map("users")
+  @@index([externalCustomerId])
+}
+
+model Conversation {
+  id              String             @id @default(cuid())
+  userId          String
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel         String
+  status          ConversationStatus @default(BOT_HANDLING)
+  assignedAgentId String?
+  agent           Agent?             @relation(fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  startedAt       DateTime           @default(now())
+  endedAt         DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  messages Message[]
+  tickets  Ticket[]
+  events   ConversationEvent[]
+
+  @@map("conversations")
+  @@index([userId])
+  @@index([status])
+  @@index([assignedAgentId])
+  @@index([channel, status])
+  @@index([userId, channel, status])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderType     SenderType
+  content        String
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  @@map("messages")
+  @@index([conversationId, createdAt])
+}
+
+model Ticket {
+  id              String         @id @default(cuid())
+  conversationId  String
+  conversation    Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  subject         String
+  description     String
+  priority        TicketPriority @default(MEDIUM)
+  status          TicketStatus   @default(OPEN)
+  assignedAgentId String?
+  agent           Agent?         @relation(fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@map("tickets")
+  @@index([conversationId])
+  @@index([userId])
+  @@index([status])
+  @@index([priority])
+  @@index([assignedAgentId])
+}
+
+model Agent {
+  id            String      @id @default(cuid())
+  name          String
+  email         String      @unique
+  status        AgentStatus @default(AVAILABLE)
+  createdAt     DateTime    @default(now())
+
+  conversations Conversation[]
+  tickets       Ticket[]
+
+  @@map("agents")
+  @@index([status])
+}
+
+// Usuarios del panel web (login separado del chat). El email se guarda en minúsculas.
+model AdminUser {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  passwordHash   String
+  role           AdminRole
+  active         Boolean   @default(true)
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  sessions AdminSession[]
+
+  @@map("admin_users")
+}
+
+// Sesiones del panel web. Solo se guarda el hash SHA-256 del token, nunca el token.
+model AdminSession {
+  id          String    @id @default(cuid())
+  adminUserId String
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique
+  createdAt   DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  expiresAt   DateTime
+
+  @@map("admin_sessions")
+  @@index([adminUserId])
+}
+
+// Usuarios de la empresa que se autentican en el chat para consultar sus datos.
+// El login es usuario + contraseña en una página web aparte; nunca por el chat.
+model CompanyUser {
+  id              String      @id @default(cuid())
+  username        String      @unique
+  passwordHash    String
+  displayName     String
+  role            CompanyRole @default(USER)
+  active          Boolean     @default(true)
+  // Teléfono autorizado (con REQUIRE_PHONE_MATCH). Opcional.
+  registeredPhone String?
+  failedAttempts  Int         @default(0)
+  lockedUntil     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  chatSessions ChatSession[]
+
+  @@map("company_users")
+}
+
+// Enlaces de login enviados por el canal. Solo se guarda el hash SHA-256 del token.
+model LoginLink {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  channel   String
+  contactId String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@map("login_links")
+  @@index([channel, contactId])
+}
+
+// Sesión de chat ligada a (channel, contactId). Solo se guarda el hash del sessionId.
+model ChatSession {
+  id                String      @id @default(cuid())
+  companyUserId     String
+  companyUser       CompanyUser @relation(fields: [companyUserId], references: [id], onDelete: Cascade)
+  channel           String
+  contactId         String
+  // Vence por inactividad (se renueva con la actividad).
+  expiresAt         DateTime
+  // Tope absoluto desde la creación, aunque haya actividad.
+  absoluteExpiresAt DateTime
+  revokedAt         DateTime?
+  lastActivityAt    DateTime    @default(now())
+  createdAt         DateTime    @default(now())
+
+  @@map("chat_sessions")
+  @@index([channel, contactId])
+  @@index([companyUserId])
+}
+
+// Auditoría de identidad y sesión. Nunca guarda contraseñas, hashes ni tokens.
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorType  String
+  actorId    String?
+  action     String
+  targetType String?
+  targetId   String?
+  ip         String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@map("audit_logs")
+  @@index([createdAt])
+  @@index([actorId])
+}
+
+model KnowledgeArticle {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  category  String
+  keywords  String[]
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("knowledge_articles")
+  @@index([category, active])
+  @@index([active])
+}
+
+model ConversationEvent {
+  id             String               @id @default(cuid())
+  conversationId String
+  conversation   Conversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  type           ConversationEventType
+  metadata       Json?
+  createdAt      DateTime             @default(now())
+
+  @@map("conversation_events")
+  @@index([conversationId, createdAt])
+}

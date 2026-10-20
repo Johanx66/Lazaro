@@ -1,0 +1,20 @@
+# No copiar secretos ni artefactos locales a la imagen.
+.env
+.env.*
+!.env.example
+
+node_modules
+dist
+coverage
+
+# Datos y logs locales
+.pglite-data
+*.log
+
+# Cliente Prisma generado (se regenera durante el build)
+src/generated
+
+.git
+.gitignore
+.vscode
+*.md

@@ -1,0 +1,62 @@
+import { NotFoundError } from "../../../../shared/errors/app.error.js";
+import type { PasswordHasher } from "../../../../shared/domain/password-hasher.js";
+import type { AuditWriter } from "../../domain/audit.js";
+import type { CompanyRole, PublicCompanyUser } from "../../domain/entities/company-user.js";
+import { toPublicCompanyUser } from "../../domain/entities/company-user.js";
+import type { CompanyUserRepository } from "../../domain/repositories/company-user-repository.js";
+
+export interface UpdateCompanyUserDeps {
+  repository: CompanyUserRepository;
+  hasher: PasswordHasher;
+  audit: AuditWriter;
+}
+
+export interface UpdateCompanyUserCommand {
+  id: string;
+  displayName?: string;
+  role?: CompanyRole;
+  active?: boolean;
+  registeredPhone?: string | null;
+  /** Si se indica, se re-hashea. Nunca se guarda en claro. */
+  password?: string;
+  adminId: string;
+  ip?: string | null;
+}
+
+export class UpdateCompanyUserUseCase {
+  constructor(private readonly deps: UpdateCompanyUserDeps) {}
+
+  async execute(command: UpdateCompanyUserCommand): Promise<PublicCompanyUser> {
+    const data: {
+      displayName?: string;
+      role?: CompanyRole;
+      active?: boolean;
+      registeredPhone?: string | null;
+      passwordHash?: string;
+    } = {};
+    if (command.displayName !== undefined) data.displayName = command.displayName;
+    if (command.role !== undefined) data.role = command.role;
+    if (command.active !== undefined) data.active = command.active;
+    if (command.registeredPhone !== undefined) data.registeredPhone = command.registeredPhone;
+    if (command.password !== undefined) data.passwordHash = await this.deps.hasher.hash(command.password);
+
+    const updated = await this.deps.repository.update(command.id, data);
+    if (!updated) throw new NotFoundError("Usuario no encontrado", "USER_NOT_FOUND");
+
+    await this.deps.audit.record({
+      actorType: "ADMIN",
+      actorId: command.adminId,
+      action: updated.active ? "COMPANY_USER_UPDATED" : "COMPANY_USER_DEACTIVATED",
+      targetType: "company_user",
+      targetId: updated.id,
+      ip: command.ip ?? null,
+      metadata: {
+        fields: Object.keys(data),
+        role: updated.role,
+        active: updated.active,
+      },
+    });
+
+    return toPublicCompanyUser(updated);
+  }
+}

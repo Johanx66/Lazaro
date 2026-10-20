@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Administración de preguntas frecuentes</title>
+    <link rel="stylesheet" href="/admin/admin.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="loginView" hidden>
+        <h1>Iniciar sesión</h1>
+        <form id="loginForm" novalidate>
+          <label>Correo electrónico
+            <input id="loginEmail" type="email" autocomplete="username" required />
+          </label>
+          <label>Contraseña
+            <input id="loginPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <div id="loginError" class="error" hidden></div>
+          <button type="submit" id="loginSubmit">Entrar</button>
+        </form>
+      </section>
+
+      <section id="panelView" hidden>
+        <header>
+          <h1>Preguntas frecuentes</h1>
+          <a href="/admin/identity.html">Usuarios y sesiones</a>
+          <span id="userInfo"></span>
+          <button type="button" id="logoutBtn" class="secondary">Cerrar sesión</button>
+        </header>
+
+        <div id="panelError" class="error" hidden></div>
+
+        <form id="filtersForm" class="filters">
+          <input id="filterQ" type="search" placeholder="Buscar…" maxlength="100" />
+          <input id="filterCategory" type="text" placeholder="Categoría" maxlength="50" />
+          <select id="filterActive">
+            <option value="all">Todas</option>
+            <option value="true">Activas</option>
+            <option value="false">Inactivas</option>
+          </select>
+          <button type="submit">Filtrar</button>
+          <button type="button" id="newBtn" class="secondary">Nueva pregunta</button>
+        </form>
+
+        <div id="listEmpty" hidden>No hay preguntas frecuentes para mostrar.</div>
+        <ul id="list"></ul>
+
+        <div class="pager">
+          <button type="button" id="prevBtn" class="secondary">Anterior</button>
+          <span id="pageInfo"></span>
+          <button type="button" id="nextBtn" class="secondary">Siguiente</button>
+        </div>
+
+        <form id="editForm" hidden novalidate>
+          <h2 id="formTitle">Nueva pregunta</h2>
+          <label>Pregunta
+            <input id="fTitle" type="text" maxlength="200" />
+          </label>
+          <label>Respuesta
+            <textarea id="fContent" rows="6" maxlength="20000"></textarea>
+          </label>
+          <label>Categoría
+            <input id="fCategory" type="text" maxlength="50" />
+          </label>
+          <label>Palabras clave (separadas por coma, máximo 10)
+            <input id="fKeywords" type="text" />
+          </label>
+          <label class="check">
+            <input id="fActive" type="checkbox" checked /> Activa
+          </label>
+          <div id="formError" class="error" hidden></div>
+          <div class="row">
+            <button type="submit" id="saveBtn">Guardar</button>
+            <button type="button" id="cancelBtn" class="secondary">Cancelar</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <script src="/admin/admin.js" defer></script>
+  </body>
+</html>

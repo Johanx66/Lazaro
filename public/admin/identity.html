@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Usuarios y sesiones</title>
+    <link rel="stylesheet" href="/admin/admin.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="loginView" hidden>
+        <h1>Iniciar sesión</h1>
+        <form id="loginForm" novalidate>
+          <label>Correo electrónico
+            <input id="loginEmail" type="email" autocomplete="username" required />
+          </label>
+          <label>Contraseña
+            <input id="loginPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <div id="loginError" class="error" hidden></div>
+          <button type="submit" id="loginSubmit">Entrar</button>
+        </form>
+      </section>
+
+      <section id="panelView" hidden>
+        <header>
+          <h1>Usuarios y sesiones</h1>
+          <a href="/admin/index.html">Preguntas frecuentes</a>
+          <span id="userInfo"></span>
+          <button type="button" id="logoutBtn" class="secondary">Cerrar sesión</button>
+        </header>
+
+        <div id="panelError" class="error" hidden></div>
+
+        <section class="block">
+          <h2>Usuarios de empresa</h2>
+          <p class="hint">
+            Estas son las cuentas que se autentican desde el chat (nunca por el chat).
+            La contraseña se guarda cifrada; no se muestra aquí.
+          </p>
+
+          <form id="userForm" class="filters" novalidate>
+            <input id="uUsername" type="text" placeholder="usuario" maxlength="60" />
+            <input id="uDisplayName" type="text" placeholder="Nombre para mostrar" maxlength="120" />
+            <input id="uPassword" type="password" placeholder="Contraseña (mínimo 12)" autocomplete="new-password" />
+            <input id="uPhone" type="text" placeholder="Teléfono registrado (opcional)" maxlength="40" />
+            <select id="uRole">
+              <option value="USER">Usuario</option>
+              <option value="ADMIN">Administrador</option>
+            </select>
+            <button type="submit" id="userSaveBtn">Crear usuario</button>
+            <button type="button" id="userCancelBtn" class="secondary" hidden>Cancelar</button>
+          </form>
+          <div id="userFormError" class="error" hidden></div>
+
+          <div id="usersEmpty" hidden>No hay usuarios de empresa.</div>
+          <ul id="usersList"></ul>
+        </section>
+
+        <section class="block">
+          <h2>Sesiones de chat activas</h2>
+          <p class="hint">Sesiones iniciadas desde el chat que siguen vigentes.</p>
+          <button type="button" id="refreshSessionsBtn" class="secondary">Actualizar</button>
+          <div id="sessionsEmpty" hidden>No hay sesiones activas.</div>
+          <ul id="sessionsList"></ul>
+        </section>
+      </section>
+    </main>
+
+    <script src="/admin/identity.js" defer></script>
+  </body>
+</html>

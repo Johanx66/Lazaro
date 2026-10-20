@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+coverage/
+*.log
+src/generated/
+.pglite-data*/
+.env.*
+!.env.example

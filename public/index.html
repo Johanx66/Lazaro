@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat de prueba</title>
+    <link rel="stylesheet" href="/chat.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <div class="avatar">A</div>
+        <div>
+          <h1>Chat de prueba</h1>
+          <small>simulando WhatsApp con el backend local</small>
+        </div>
+        <span id="status">conectando…</span>
+      </header>
+      <div id="devbar">
+        <label for="phoneSelect">Teléfono de prueba</label>
+        <select id="phoneSelect"></select>
+        <label for="nameInput">Nombre</label>
+        <input id="nameInput" type="text" autocomplete="off" placeholder="Nombre" />
+      </div>
+      <div id="messages"></div>
+      <div id="error"></div>
+      <div id="inputRow">
+        <input
+          id="input"
+          type="text"
+          autocomplete="off"
+          placeholder="Escribe un mensaje…"
+        />
+        <button id="send" disabled>Enviar</button>
+      </div>
+    </div>
+
+    <script src="/chat.js" defer></script>
+  </body>
+</html>
