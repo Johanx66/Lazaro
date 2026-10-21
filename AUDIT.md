@@ -554,4 +554,65 @@ Tests nuevos: `telegram-adapter.test.ts`, `telegram-webhook.test.ts`,
 `telegram-sender.test.ts`, `telegram-mode.test.ts`, `chat-login.telegram.test.ts`,
 `agent-panel-telegram.test.ts` + caso `TELEGRAM` en `process-incoming-message.extid.test.ts`.
 
+## Arranque: creación opcional del admin inicial (Railway)
+
+### Qué se hizo
+
+1. **`src/shared/application/bootstrap-admin.ts`** (nuevo): `bootstrapAdmin(store, hasher, input)`.
+   - Sin `ADMIN_EMAIL`/`ADMIN_PASSWORD` → `skipped-missing` (no toca la BD).
+   - Contraseña < 12 caracteres → `skipped-weak-password`.
+   - Si ya existe **cualquier** usuario con rol `ADMIN` (`count({ where: { role: "ADMIN" } })`) →
+     `skipped-existing-admin`; **no sobrescribe** ni el email ni el hash.
+   - Si no hay admin → crea uno con email en minúsculas, `passwordHash` (argon2id) y `role: "ADMIN"`.
+   - Nunca imprime ni registra la contraseña ni el hash.
+2. **`src/main.ts`**: tras validar la config y antes de montar repos, si
+   `databaseConfigured` llama a `bootstrapAdmin(prisma, new Argon2PasswordHasher(), …)` y
+   loguea el resultado como JSON (`{level,msg}`), sin datos sensibles. El runner ejecuta
+   `prisma migrate deploy && node dist/main.js`, así que el admin se crea **después** de migrar.
+3. **`.env.example`**: se aclara que `ADMIN_EMAIL`/`ADMIN_PASSWORD` se usan también en el
+   arranque (idempotente), no solo en el seed.
+
+### Diferencia con el seed (`prisma db seed`)
+
+- El seed (`prisma/seed.ts` → `seed-admin.ts`) usa **tsx** (devDependency, no está en el
+  runner) y además siembra artículos y un usuario de empresa de ejemplo.
+- El arranque usa solo código compilado (`dist/`), no requiere tsx ni CLI de Prisma extra:
+  es la vía para crear el admin en Railway sin acceso a la BD desde local.
+
+### Cómo probarlo (Railway)
+
+1. Definir `ADMIN_EMAIL` y `ADMIN_PASSWORD` (≥ 12 caracteres) en las variables del servicio.
+2. Desplegar/redesplegar; en los logs aparece `"Arranque: administrador inicial creado."` la
+   primera vez y `"Arranque: ya existe un administrador; no se crea ninguno nuevo."` después.
+3. Login en `/admin/agent-panel.html` (o `/admin/`) con esas credenciales.
+4. Opcional: una vez creado, quitar `ADMIN_EMAIL`/`ADMIN_PASSWORD` del entorno (ya no se usan).
+
+### Verificación (salida literal)
+
+`npm run typecheck`: exit 0.
+
+```text
+npm notice run chatbot-soporte-backend@0.1.0 typecheck
+npm notice run tsc -p tsconfig.build.json --noEmit
+```
+
+`npm test`: exit 0.
+
+```text
+npm notice run chatbot-soporte-backend@0.1.0 test
+npm notice run vitest run
+
+ RUN  v5.0.1 C:/Users/Wilso/Downloads/todo menos ultima fase (en teoria)/prueba/Chatbot-Juan/Chatbot-main
+
+
+ Test Files  47 passed (47)
+      Tests  397 passed (397)
+   Start at  23:04:30
+   Duration  29.95s (tests 76%, import 15%, transform 8%, worker 1%)
+```
+
+Tests nuevos: `src/shared/application/bootstrap-admin.test.ts` (6 casos: faltan var,
+contraseña débil, ya existe admin, creación con hash/rol, email en minúsculas, no filtra
+contraseña).
+
 

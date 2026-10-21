@@ -1,4 +1,6 @@
 import { createApp } from "./app.js";
+import { bootstrapAdmin } from "./shared/application/bootstrap-admin.js";
+import { Argon2PasswordHasher } from "./shared/infrastructure/argon2-password-hasher.js";
 import { env } from "./shared/config/env.js";
 import { isChannelMode, modeIncludesTelegram, modeIncludesWeb, modeIncludesWhatsapp } from "./shared/config/channel-mode.js";
 import { validateConfig } from "./shared/config/validate.js";
@@ -75,6 +77,21 @@ if (modeIncludesTelegram(env.channelMode) && !env.telegramWebhookSecret) {
       msg: "TELEGRAM_WEBHOOK_SECRET no configurado: el webhook de Telegram rechazará todas las peticiones (401)",
     }),
   );
+}
+
+// Arranque opcional: si ADMIN_EMAIL/ADMIN_PASSWORD están definidos y aún no existe
+// ningún usuario ADMIN, se crea aquí (tras migrate deploy). Idempotente: si ya hay
+// un admin no toca nada. Nunca registra la contraseña.
+const adminBootstrap = databaseConfigured
+  ? await bootstrapAdmin(
+      prisma,
+      new Argon2PasswordHasher(),
+      { email: env.adminEmail, password: env.adminPassword },
+      (message) => console.log(JSON.stringify({ level: "info", msg: message })),
+    )
+  : "skipped-missing";
+if (databaseConfigured && adminBootstrap === "created") {
+  console.log(JSON.stringify({ level: "info", msg: "admin inicial disponible para login" }));
 }
 
 const userRepository = new PrismaUserRepository(prisma);
