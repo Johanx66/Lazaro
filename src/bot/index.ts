@@ -12,6 +12,7 @@ import type { UserRepository } from "../modules/users/domain/repositories/user-r
 import type { WebChatAdapter } from "../channels/infrastructure/web-chat-adapter.js";
 import type { WhatsAppAdapter } from "../channels/infrastructure/whatsapp-adapter.js";
 import type { TelegramAdapter } from "../channels/infrastructure/telegram-adapter.js";
+import type { TelegramMenuAdapter } from "../channels/infrastructure/telegram-menu-adapter.js";
 import { webChatRoutes } from "../channels/presentation/web-chat-routes.js";
 import { isChannelMode, modeIncludesTelegram, modeIncludesWeb, modeIncludesWhatsapp } from "../shared/config/channel-mode.js";
 import { HandleInboundMessageUseCase } from "./application/handle-inbound-message.js";
@@ -24,6 +25,7 @@ import type {
 import { createBotpressBrain } from "./botpress/index.js";
 import { CompositeKnowledgeRepository, StaticKnowledgeBase } from "./domain/knowledge.js";
 import type { KnowledgeRepository } from "./domain/knowledge.js";
+import { PQRS_CATEGORY_PREFIX } from "./domain/menu.js";
 import type { WhatsAppSender } from "./domain/whatsapp.js";
 import { PrismaKnowledgeBaseRepository } from "./infrastructure/prisma-knowledge-repository.js";
 import { telegramWebhookRouter } from "./presentation/telegram-webhook.js";
@@ -44,6 +46,8 @@ export interface WireBotDeps {
   whatsappAdapter?: WhatsAppAdapter;
   /** Adaptador único de Telegram (solo cuando el modo de canal lo incluye). */
   telegramAdapter?: TelegramAdapter;
+  /** Adaptador de menú de Telegram (teclado inline). Solo si el modo incluye Telegram. */
+  telegramMenuAdapter?: TelegramMenuAdapter;
   /** secret_token del webhook de Telegram (mismo valor que en setWebhook). */
   telegramWebhookSecret?: string;
   /** Enviador de WhatsApp, compartido con el notifier de asesores. */
@@ -69,6 +73,12 @@ export function wireBot(app: Express, deps: WireBotDeps): void {
       : []),
   ]);
 
+  // Artículos de PQRS: solo los de categoría "PQRS ...". Se consultan únicamente
+  // en el modo PQRS del menú, nunca en el flujo general.
+  const pqrsKnowledge = new PrismaKnowledgeBaseRepository(deps.prisma, deps.env.faqMinConfidence, {
+    categoryPrefix: PQRS_CATEGORY_PREFIX,
+  });
+
   const processor = new ProcessIncomingMessageUseCase({
     users: {
       findOrCreateUser: async (phone, name, channel) => {
@@ -90,6 +100,7 @@ export function wireBot(app: Express, deps: WireBotDeps): void {
       transferToHuman: (input) => deps.transferToHuman.execute(input),
     },
     knowledge: knowledgeRepository,
+    pqrsKnowledge,
     transferAfterMisses: deps.env.transferAfterMisses,
     identity: deps.identity,
     classifier: deps.classifier,
@@ -133,7 +144,13 @@ export function wireBot(app: Express, deps: WireBotDeps): void {
       telegramWebhookRouter({
         secretToken: deps.telegramWebhookSecret ?? "",
         adapter: tgAdapter,
-        handleInbound: new HandleInboundMessageUseCase({ processor, adapter: tgAdapter, notifier }),
+        handleInbound: new HandleInboundMessageUseCase({
+          processor,
+          adapter: tgAdapter,
+          notifier,
+          menuAdapter: deps.telegramMenuAdapter,
+        }),
+        menuAdapter: deps.telegramMenuAdapter,
       }),
     );
   }

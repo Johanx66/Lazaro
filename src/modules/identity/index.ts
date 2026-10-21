@@ -27,6 +27,7 @@ import { RevokeChatSessionUseCase } from "./application/use-cases/revoke-chat-se
 import { UpdateCompanyUserUseCase } from "./application/use-cases/update-company-user.js";
 import { ValidateLoginLinkUseCase } from "./application/use-cases/validate-login-link.js";
 import type { ChatNotifier } from "./domain/notifier.js";
+import type { ChatMenuNotifier } from "./domain/notifier.js";
 import { PrismaAuditLogRepository } from "./infrastructure/prisma-audit-log-repository.js";
 import { PrismaChatSessionRepository } from "./infrastructure/prisma-chat-session-repository.js";
 import { PrismaCompanyUserRepository } from "./infrastructure/prisma-company-user-repository.js";
@@ -52,6 +53,11 @@ export interface WireIdentityOptions {
   trustedOrigins: string[];
   /** Avisa al usuario por su canal cuando inicia sesión. */
   notifier: ChatNotifier;
+  /**
+   * Entrega el menú de atención al chat verificado (Telegram). Opcional: sin él,
+   * el login funciona igual y no se envía ningún menú.
+   */
+  menuNotifier?: ChatMenuNotifier;
   /**
    * Patrón que debe cumplir el código de cliente de la BD de la empresa. Vacío =>
    * patrón por defecto.
@@ -101,6 +107,7 @@ export function wireIdentity(
     clock,
     audit,
     notifier: options.notifier,
+    menuNotifier: options.menuNotifier,
     fillerHash: createFillerHash(hasher),
     requirePhoneMatch: options.requirePhoneMatch,
     skipPhoneMatchForTelegram: options.skipPhoneMatchForTelegram,

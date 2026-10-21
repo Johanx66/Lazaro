@@ -2,18 +2,25 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { Router } from "express";
 import type { Request, Response } from "express";
 import {
-  readTelegramChatId,
+  readTelegramCallback,
   readTelegramUpdateId,
 } from "../../channels/infrastructure/telegram-adapter.js";
 import type { TelegramAdapter } from "../../channels/infrastructure/telegram-adapter.js";
+import type { MenuChannelAdapter } from "../../channels/domain/telegram-menu.js";
 import { rateLimit } from "../../shared/http/rate-limit.js";
 import type { HandleInboundMessageUseCase } from "../application/handle-inbound-message.js";
+import { menuSelectedText } from "../domain/menu.js";
 
 export interface TelegramWebhookDeps {
   /** secret_token configurado en setWebhook. Vacío => el webhook rechaza todo (401). */
   secretToken: string;
   adapter: TelegramAdapter;
   handleInbound: HandleInboundMessageUseCase;
+  /**
+   * Canal con teclado inline. Sin él, los botones se responden igual pero el
+   * menú no se edita.
+   */
+  menuAdapter?: MenuChannelAdapter;
 }
 
 const DEDUPE_TTL_MS = 10 * 60 * 1000; // 10 minutos
@@ -108,6 +115,24 @@ export function telegramWebhookRouter(deps: TelegramWebhookDeps): Router {
         return;
       }
 
+      // Botón del menú pulsado: se responde de inmediato para que Telegram
+      // deje de mostrar el indicador de carga, y luego se procesa la acción.
+      const callback = readTelegramCallback(req.body);
+      if (callback && deps.menuAdapter) {
+        await deps.menuAdapter
+          .answerCallbackQuery(callback.chatId, callback.id)
+          .catch((error: unknown) => {
+            console.error(
+              JSON.stringify({
+                level: "warn",
+                msg: "no se pudo confirmar el callback de Telegram",
+                chatId: callback.chatId,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+          });
+      }
+
       const inbound = deps.adapter.parseInbound(req.body);
       if (!inbound) {
         // Payload sin texto procesable: se acusa recibo para que Telegram no reintente.
@@ -122,7 +147,26 @@ export function telegramWebhookRouter(deps: TelegramWebhookDeps): Router {
       }
 
       try {
-        await deps.handleInbound.execute(inbound);
+        const result = await deps.handleInbound.execute(inbound);
+        // Tras elegir una opción, el mensaje del menú se edita para quitar el
+        // teclado y dejar constancia de lo elegido.
+        if (callback && callback.messageId !== null && result.menuAction && deps.menuAdapter) {
+          await deps.menuAdapter
+            .editMenu(callback.chatId, callback.messageId, {
+              text: menuSelectedText(result.menuAction),
+              buttons: [],
+            })
+            .catch((error: unknown) => {
+              console.error(
+                JSON.stringify({
+                  level: "warn",
+                  msg: "no se pudo editar el menú de Telegram",
+                  chatId: callback.chatId,
+                  error: error instanceof Error ? error.message : String(error),
+                }),
+              );
+            });
+        }
         if (updateId !== null) dedupe.add(updateId);
         res.status(200).json({ status: "ok" });
       } catch (error) {

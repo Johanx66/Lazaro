@@ -10,6 +10,7 @@ import { createRequireSession, requireRole } from "./modules/auth/presentation/a
 import { wireIdentity } from "./modules/identity/index.js";
 import { AdapterChatNotifier } from "./modules/identity/infrastructure/adapter-chat-notifier.js";
 import { wireBot } from "./bot/index.js";
+import { AdapterChatMenuNotifier } from "./bot/infrastructure/adapter-chat-menu-notifier.js";
 import { wireConversations, wireAgentPanel } from "./modules/conversations/index.js";
 import { wireKnowledge } from "./modules/knowledge/index.js";
 import { wireTickets } from "./modules/tickets/index.js";
@@ -28,7 +29,9 @@ import { GraphWhatsAppSender, LogWhatsAppSender } from "./bot/infrastructure/wha
 import { WebChatAdapter } from "./channels/infrastructure/web-chat-adapter.js";
 import { WhatsAppAdapter } from "./channels/infrastructure/whatsapp-adapter.js";
 import { TelegramAdapter } from "./channels/infrastructure/telegram-adapter.js";
+import { TelegramMenuAdapter } from "./channels/infrastructure/telegram-menu-adapter.js";
 import { HttpTelegramSender, LogTelegramSender } from "./bot/infrastructure/telegram-sender.js";
+import { HttpTelegramMenuSender, LogTelegramMenuSender } from "./bot/infrastructure/telegram-menu-sender.js";
 import { IntentClassifier } from "./modules/chatbot/application/intent-classifier.js";
 import { QueryDataUseCase } from "./modules/chatbot/application/query-data-use-case.js";
 import { createLlmProvider } from "./modules/chatbot/infrastructure/create-llm-provider.js";
@@ -132,6 +135,15 @@ const whatsappAdapter = modeIncludesWhatsapp(env.channelMode) ? new WhatsAppAdap
 const telegramSender = env.telegramBotToken ? new HttpTelegramSender(env.telegramBotToken) : new LogTelegramSender();
 const telegramAdapter = modeIncludesTelegram(env.channelMode) ? new TelegramAdapter(telegramSender) : undefined;
 
+// Menú de Telegram (teclado inline): solo existe si el modo de canal incluye Telegram.
+const telegramMenuAdapter = modeIncludesTelegram(env.channelMode)
+  ? new TelegramMenuAdapter(
+      env.telegramBotToken
+        ? new HttpTelegramMenuSender(env.telegramBotToken)
+        : new LogTelegramMenuSender(),
+    )
+  : undefined;
+
 // Fase 5: IA local + consultas a la BD de la empresa. Solo se habilita si hay
 // COMPANY_DATABASE_URL configurada; en caso contrario el bot usa palabras clave.
 type Phase5 = {
@@ -212,6 +224,10 @@ const app = createApp(
         ...(whatsappAdapter ? { WHATSAPP: whatsappAdapter } : {}),
         ...(telegramAdapter ? { TELEGRAM: telegramAdapter } : {}),
       }),
+      // Menú de atención: se entrega al chat verificado (solo Telegram lo admite).
+      menuNotifier: new AdapterChatMenuNotifier({
+        ...(telegramMenuAdapter ? { TELEGRAM: telegramMenuAdapter } : {}),
+      }),
     });
     wireBot(app, {
       prisma,
@@ -225,6 +241,7 @@ const app = createApp(
       webAdapter,
       whatsappAdapter,
       telegramAdapter,
+      telegramMenuAdapter,
       telegramWebhookSecret: env.telegramWebhookSecret,
       sender,
       identity: identity.chatIdentity,

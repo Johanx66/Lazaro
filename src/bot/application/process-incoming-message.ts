@@ -11,7 +11,18 @@ import type {
 } from "../../modules/conversations/domain/entities/conversation.js";
 import type { KnowledgeRepository } from "../domain/knowledge.js";
 import type { InboundMessage } from "../../channels/domain/channel-adapter.js";
+import type { TelegramMenu } from "../../channels/domain/telegram-menu.js";
 import type { CompanyRole } from "../../modules/identity/domain/entities/company-user.js";
+import {
+  buildAttentionMenu,
+  DATA_QUERY_REQUEST,
+  MENU_COMMAND,
+  MENU_LABELS,
+  parseMenuCallback,
+  parseMenuSelection,
+  PQRS_ASK_DETAILS,
+} from "../domain/menu.js";
+import type { MenuAction } from "../domain/menu.js";
 
 export interface UserAccountPort {
   findOrCreateUser(phone: string, name: string, channel: ChatChannel): Promise<{ id: string }>;
@@ -97,6 +108,10 @@ export interface ProcessIncomingMessageResult {
   reply: string | null;
   handledByBot: boolean;
   status: ConversationStatus;
+  /** Menú con teclado inline que el canal debe enviar (solo Telegram). */
+  menu?: TelegramMenu;
+  /** Acción del menú que eligió el usuario, si eligió alguna. */
+  menuAction?: MenuAction;
 }
 
 const DEFAULT_FALLBACK_REPLY =
@@ -199,6 +214,12 @@ export interface ProcessIncomingMessageDeps {
   users: UserAccountPort;
   conversations: InboundConversationPorts;
   knowledge: KnowledgeRepository;
+  /**
+   * Base de conocimiento de PQRS (artículos con categoría PQRS). Se usa solo en
+   * el modo PQRS del menú. Opcional: sin ella, la búsqueda PQRS no encuentra nada
+   * y el mensaje se cuenta como no entendido.
+   */
+  pqrsKnowledge?: KnowledgeRepository;
   fallbackReply?: string;
   transferAfterMisses: number;
   /** Opcional: gestión de la sesión de identidad del chat. Sin él, se ignora. */
@@ -212,6 +233,12 @@ export interface ProcessIncomingMessageDeps {
 export class ProcessIncomingMessageUseCase {
   private readonly fallbackReply: string;
   private readonly transferAfterMisses: number;
+  /**
+   * Conversaciones con una búsqueda PQRS armada: el siguiente mensaje del
+   * cliente se busca SOLO en los artículos de PQRS. Estado en memoria por
+   * instancia (se pierde al reiniciar el proceso).
+   */
+  private readonly pqrsArmed = new Set<string>();
 
   constructor(private readonly deps: ProcessIncomingMessageDeps) {
     this.fallbackReply = deps.fallbackReply ?? DEFAULT_FALLBACK_REPLY;
@@ -221,8 +248,10 @@ export class ProcessIncomingMessageUseCase {
   async execute(inbound: InboundMessage): Promise<ProcessIncomingMessageResult> {
     const phone = inbound.contactId;
     const name = inbound.name;
-    const text = inbound.text;
     const channel = inbound.channel;
+    // Un botón pulsado llega como `callback_data`; se traduce a la etiqueta
+    // legible de la opción para que el historial no guarde identificadores internos.
+    const text = this.resolveInboundText(inbound.text);
 
     const user = await this.deps.users.findOrCreateUser(phone, name, channel);
 
@@ -267,6 +296,17 @@ export class ProcessIncomingMessageUseCase {
       conversation.id,
     );
     if (identityReply) return identityReply;
+
+    // Menú de atención (solo Telegram, que es el único canal con teclado inline).
+    const menuReply = await this.handleMenu(
+      text,
+      user.id,
+      conversation.id,
+      channel,
+      phone,
+      name,
+    );
+    if (menuReply) return menuReply;
 
     if (this.deps.classifier) {
       return this.handleWithClassifier(text, user.id, conversation.id, channel, phone, name);
@@ -525,5 +565,133 @@ export class ProcessIncomingMessageUseCase {
     }
 
     return null;
+  }
+
+  /**
+   * Traduce el `callback_data` de un botón pulsado a la etiqueta legible de la
+   * opción. El resto del texto llega tal cual.
+   */
+  private resolveInboundText(raw: string): string {
+    const action = parseMenuCallback(raw);
+    return action ? MENU_LABELS[action] : raw;
+  }
+
+  /**
+   * Menú de atención (solo Telegram, que es el único canal con teclado inline):
+   * - "/menu" vuelve a mostrar el menú con teclado inline.
+   * - "1", "2", "3" o la etiqueta de la opción ejecutan esa acción.
+   * - Con una búsqueda PQRS armada, el mensaje se busca SOLO en los artículos PQRS.
+   *
+   * Devuelve null si el mensaje no es del menú y hay que seguir el flujo normal.
+   */
+  private async handleMenu(
+    text: string,
+    userId: string,
+    conversationId: string,
+    channel: ChatChannel,
+    phone: string,
+    name: string,
+  ): Promise<ProcessIncomingMessageResult | null> {
+    if (channel !== "TELEGRAM") return null;
+
+    if (text.trim().toLowerCase() === MENU_COMMAND) {
+      return this.showMenu(conversationId);
+    }
+
+    const action = parseMenuSelection(text);
+    if (action) {
+      return this.handleMenuAction(action, userId, conversationId, channel, phone, name);
+    }
+
+    // Búsqueda PQRS armada: consume el mensaje y NO cae en el flujo general.
+    if (this.pqrsArmed.has(conversationId)) {
+      this.pqrsArmed.delete(conversationId);
+      return this.handlePqrsQuery(text, userId, conversationId, phone, name);
+    }
+
+    return null;
+  }
+
+  /** Ejecuta la opción elegida del menú de atención. */
+  private async handleMenuAction(
+    action: MenuAction,
+    userId: string,
+    conversationId: string,
+    channel: ChatChannel,
+    phone: string,
+    name: string,
+  ): Promise<ProcessIncomingMessageResult> {
+    // Elegir otra opción cancela cualquier búsqueda PQRS pendiente.
+    this.pqrsArmed.delete(conversationId);
+
+    if (action === "pqrs") {
+      this.pqrsArmed.add(conversationId);
+      const botReply = await this.deps.conversations.recordBotReply(conversationId, PQRS_ASK_DETAILS);
+      return {
+        conversationId,
+        reply: PQRS_ASK_DETAILS,
+        handledByBot: true,
+        status: botReply.status,
+        menuAction: action,
+      };
+    }
+
+    if (action === "datos") {
+      const result = await this.handleDataQuery(
+        DATA_QUERY_REQUEST,
+        userId,
+        conversationId,
+        channel,
+        phone,
+        name,
+      );
+      return { ...result, menuAction: action };
+    }
+
+    resetMissCount(conversationId);
+    const transferred = await this.transfer(
+      conversationId,
+      userId,
+      phone,
+      name,
+      MENU_LABELS.asesor,
+      "HUMAN_REQUEST",
+    );
+    return { ...transferred, menuAction: action };
+  }
+
+  /** Vuelve a mostrar el menú de atención. */
+  private async showMenu(conversationId: string): Promise<ProcessIncomingMessageResult> {
+    const menu = buildAttentionMenu();
+    const botReply = await this.deps.conversations.recordBotReply(conversationId, menu.text);
+    return {
+      conversationId,
+      reply: menu.text,
+      handledByBot: true,
+      status: botReply.status,
+      menu,
+    };
+  }
+
+  /**
+   * Busca el mensaje del cliente SOLO en los artículos de PQRS. Si no hay
+   * coincidencia, cuenta como mensaje no entendido (mismo camino seguro que el
+   * resto del bot: nunca se inventa una respuesta).
+   */
+  private async handlePqrsQuery(
+    text: string,
+    userId: string,
+    conversationId: string,
+    phone: string,
+    name: string,
+  ): Promise<ProcessIncomingMessageResult> {
+    const pqrs = this.deps.pqrsKnowledge;
+    const answer = pqrs ? await pqrs.findAnswer(text) : null;
+    if (answer) {
+      resetMissCount(conversationId);
+      const botReply = await this.deps.conversations.recordBotReply(conversationId, answer);
+      return { conversationId, reply: answer, handledByBot: true, status: botReply.status };
+    }
+    return this.registerMiss(conversationId, userId, phone, name, text);
   }
 }

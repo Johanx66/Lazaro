@@ -3,7 +3,7 @@ import type { AuditWriter } from "../../domain/audit.js";
 import type { Clock } from "../../domain/clock.js";
 import type { CompanyRole } from "../../domain/entities/company-user.js";
 import type { LoginLink } from "../../domain/entities/login-link.js";
-import type { ChatNotifier } from "../../domain/notifier.js";
+import type { ChatMenuNotifier, ChatNotifier } from "../../domain/notifier.js";
 import type { CompanyUserRepository } from "../../domain/repositories/company-user-repository.js";
 import type { LoginLinkRepository } from "../../domain/repositories/login-link-repository.js";
 import type { ChatSessionService } from "../chat-session-service.js";
@@ -44,6 +44,11 @@ export interface ChatLoginDeps {
   clock: Clock;
   audit: AuditWriter;
   notifier: ChatNotifier;
+  /**
+   * Entrega el menú de atención al chat verificado. Opcional: sin él, el login
+   * funciona igual y no se envía ningún menú.
+   */
+  menuNotifier?: ChatMenuNotifier;
   /** Hash argon2id de relleno para igualar tiempos si el usuario no existe. */
   fillerHash: Promise<string>;
   /** Si true, el teléfono del contacto debe coincidir con el registrado del usuario. */
@@ -151,6 +156,18 @@ export class ChatLoginUseCase {
       );
     } catch {
       // Ignorado a propósito.
+    }
+
+    // Menú de atención: se entrega al MISMO chat del enlace (channel, contactId).
+    // No se confía en ningún chat_id recibido: la asociación segura es la del
+    // enlace de un solo uso que se acaba de consumir, y la sesión que se acaba
+    // de crear usa esa misma pareja. Un fallo aquí no rompe el login.
+    if (this.deps.menuNotifier) {
+      try {
+        await this.deps.menuNotifier.sendMenu(link.channel, link.contactId);
+      } catch {
+        // Ignorado a propósito.
+      }
     }
 
     return { displayName: user.displayName, role: user.role, channel: link.channel };
