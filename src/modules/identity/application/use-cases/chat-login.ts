@@ -9,7 +9,7 @@ import type { LoginLinkRepository } from "../../domain/repositories/login-link-r
 import type { ChatSessionService } from "../chat-session-service.js";
 import { ChatInvalidCredentialsError } from "../errors.js";
 import { phoneMatches } from "../mask.js";
-import { ACCOUNT_LOCK_DURATION_MS, MAX_FAILED_LOGIN_ATTEMPTS } from "../policy.js";
+import { ACCOUNT_LOCK_DURATION_MS, CHAT_LOGIN_ALLOWED_ROLES, MAX_FAILED_LOGIN_ATTEMPTS } from "../policy.js";
 import { hashToken, isWellFormedToken } from "../tokens.js";
 
 export type ChatLoginFailureReason =
@@ -18,7 +18,8 @@ export type ChatLoginFailureReason =
   | "inactive_user"
   | "locked"
   | "wrong_password"
-  | "phone_mismatch";
+  | "phone_mismatch"
+  | "role_not_allowed";
 
 export interface ChatLoginCommand {
   /** Usuario ya normalizado (minúsculas, sin espacios) por la validación de entrada. */
@@ -89,6 +90,9 @@ export class ChatLoginUseCase {
     if (!link) return reject("invalid_link");
     if (!user) return reject("unknown_user");
     if (!user.active) return reject("inactive_user");
+    if (!CHAT_LOGIN_ALLOWED_ROLES.includes(user.role)) {
+      return reject("role_not_allowed");
+    }
     if (user.lockedUntil !== null && user.lockedUntil.getTime() > now.getTime()) {
       return reject("locked");
     }

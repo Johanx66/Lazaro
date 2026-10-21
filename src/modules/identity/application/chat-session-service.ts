@@ -1,7 +1,9 @@
 import { isChatSessionExpired } from "../domain/entities/chat-session.js";
 import type { ChatSession, ChatSessionWithOwner } from "../domain/entities/chat-session.js";
 import type { Clock } from "../domain/clock.js";
+import type { CompanyRole } from "../domain/entities/company-user.js";
 import type { ChatSessionRepository } from "../domain/repositories/chat-session-repository.js";
+import { CHAT_LOGIN_ALLOWED_ROLES } from "./policy.js";
 
 export interface CreatedChatSession {
   session: ChatSession;
@@ -12,6 +14,8 @@ export interface ChatSessionServiceDeps {
   clock: Clock;
   idleMs: number;
   absoluteMs: number;
+  /** Roles autorizados a usar el chat. Por defecto, los de `policy.ts`. */
+  allowedRoles?: readonly CompanyRole[];
 }
 
 export class ChatSessionService {
@@ -58,10 +62,16 @@ export class ChatSessionService {
     return found;
   }
 
-  /** Un cliente está autorizado si su cuenta está activa y no bloqueada temporalmente. */
+  /** Un cliente está autorizado si su cuenta está activa, no bloqueada y su rol puede usar el chat. */
   private isAuthorized(owner: ChatSessionWithOwner["owner"], now: Date): boolean {
     if (!owner.active) return false;
-    return owner.lockedUntil === null || owner.lockedUntil.getTime() <= now.getTime();
+    if (owner.lockedUntil !== null && owner.lockedUntil.getTime() > now.getTime()) return false;
+    return this.allowedRoles.includes(owner.role);
+  }
+
+  /** Roles autorizados a usar el chat (los de `policy.ts` si no se pasan otros). */
+  private get allowedRoles(): readonly CompanyRole[] {
+    return this.deps.allowedRoles ?? CHAT_LOGIN_ALLOWED_ROLES;
   }
 
   async revokeByContact(channel: string, contactId: string): Promise<boolean> {

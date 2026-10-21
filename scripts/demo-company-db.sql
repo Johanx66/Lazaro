@@ -167,3 +167,18 @@ $do$;
 \echo 'BD de demostración lista: esquema empresa_demo + vistas + usuario de solo lectura.'
 \echo 'COMPANY_DATABASE_URL de ejemplo (password de demo, no real):'
 \echo '  postgresql://company_readonly:<clave-solo-demo>@localhost:5432/company_demo'
+
+
+-- ===========================================================================
+-- VINCULACIÓN CON EL USUARIO DEL CHAT (FASE 9 / DEMO)
+-- ===========================================================================
+-- Las herramientas filtran por company_users.id. Para que un usuario creado
+-- en /admin/identity.html pueda ver sus datos de esta BD de demo:
+--
+--   1) Crear el usuario en el panel: username, displayName, role=USER,
+--      registeredPhone (coincidir con REQUIRE_PHONE_MATCH/Telegram según el caso).
+--   2) En la BD del bot (Postgres de la app), igualar su id al de la demo:
+--      UPDATE company_users SET id = 'usr_101' WHERE username = '<username>';
+--   El FK chat_sessions.companyUserId tiene ON UPDATE CASCADE (migración 0004).
+--
+-- Con usr_101 se ven pedidos 123,124,125 y saldo 150.50/500.00.

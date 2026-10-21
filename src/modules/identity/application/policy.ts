@@ -1,4 +1,14 @@
+import type { CompanyRole } from "../domain/entities/company-user.js";
+
 const MINUTE_MS = 60_000;
+
+/**
+ * Roles de cuenta autorizados a usar el chat como cliente (y a iniciar sesión en él).
+ * Valor actual: USER y ADMIN (el comportamiento de siempre, sin cambios).
+ * La decisión del dueño sobre si una cuenta ADMIN (empleado) debe poder hablar por
+ * el chat se toma aquí: es un cambio de una línea.
+ */
+export const CHAT_LOGIN_ALLOWED_ROLES: readonly CompanyRole[] = ["USER", "ADMIN"];
 
 /** Token del enlace de login y del id de sesión de chat: 32 bytes base64url (43 caracteres). */
 export const TOKEN_BYTES = 32;
