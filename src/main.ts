@@ -31,7 +31,7 @@ import { TelegramAdapter } from "./channels/infrastructure/telegram-adapter.js";
 import { HttpTelegramSender, LogTelegramSender } from "./bot/infrastructure/telegram-sender.js";
 import { IntentClassifier } from "./modules/chatbot/application/intent-classifier.js";
 import { QueryDataUseCase } from "./modules/chatbot/application/query-data-use-case.js";
-import { OllamaLlmProvider } from "./modules/chatbot/infrastructure/ollama-llm-provider.js";
+import { createLlmProvider } from "./modules/chatbot/infrastructure/create-llm-provider.js";
 import { ToolRegistry } from "./modules/chatbot/tools/tool-registry.js";
 import { getCustomerBalanceTool } from "./modules/chatbot/tools/customer-balance.tool.js";
 import { getOrderStatusTool } from "./modules/chatbot/tools/order-status.tool.js";
@@ -143,7 +143,17 @@ type Phase5 = {
 const phase5: Phase5 | undefined = env.companyDatabaseUrl
   ? (() => {
       const companyDbPool = createCompanyDbPool(env.companyDatabaseUrl, env.companyQueryTimeoutMs);
-      const llmProvider = new OllamaLlmProvider(env.ollamaBaseUrl, env.ollamaModel, env.llmTimeoutMs);
+      // Proveedor de IA: "ollama" (IA local, por defecto y en producción en la
+      // empresa) o "cloudflare" (Workers AI; SOLO pruebas con datos ficticios).
+      const llmProvider = createLlmProvider({
+        provider: env.llmProvider,
+        timeoutMs: env.llmTimeoutMs,
+        ollamaBaseUrl: env.ollamaBaseUrl,
+        ollamaModel: env.ollamaModel,
+        cloudflareAccountId: env.cloudflareAccountId,
+        cloudflareApiToken: env.cloudflareApiToken,
+        llmModel: env.llmModel,
+      });
       const toolRegistry = new ToolRegistry();
       toolRegistry.register(getCustomerBalanceTool);
       toolRegistry.register(getOrderStatusTool);
@@ -232,6 +242,7 @@ const server = app.listen(env.port, "0.0.0.0", () => {
       port: env.port,
       env: env.nodeEnv,
       databaseConfigured,
+      llmProvider: env.llmProvider,
       mockModes,
     }),
   );

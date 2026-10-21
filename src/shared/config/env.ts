@@ -2,6 +2,7 @@ import "dotenv/config";
 import { parseAllowedOrigins } from "./allowed-origins.js";
 import { resolveChannelMode } from "./channel-mode.js";
 import { DEFAULT_FAQ_MIN_CONFIDENCE, parseFaqMinConfidence } from "./faq-min-confidence.js";
+import { resolveLlmProvider } from "./llm-provider.js";
 
 const nodeEnv = process.env.NODE_ENV ?? "development";
 const faqMinConfidence = parseFaqMinConfidence(process.env.FAQ_MIN_CONFIDENCE);
@@ -71,6 +72,16 @@ export const env = {
   ollamaBaseUrl: (process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/+$/, ""),
   ollamaModel: process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct",
   llmTimeoutMs: positiveInt(Number(process.env.LLM_TIMEOUT_MS ?? "10000"), 10000),
+
+  // Proveedor de IA: "ollama" (IA local; por defecto y en producción en la empresa)
+  // o "cloudflare" (Workers AI; SOLO pruebas con datos ficticios).
+  llmProvider: resolveLlmProvider(process.env.LLM_PROVIDER),
+  // Credenciales de Cloudflare Workers AI (nunca se registran en logs).
+  cloudflareAccountId: (process.env.CLOUDFLARE_ACCOUNT_ID ?? "").trim(),
+  cloudflareApiToken: (process.env.CLOUDFLARE_API_TOKEN ?? "").trim(),
+  // Modelo de Workers AI (p. ej. "@cf/meta/llama-3.2-3b-instruct"). Sin valor por
+  // defecto: con LLM_PROVIDER=cloudflare es obligatorio.
+  llmModel: (process.env.LLM_MODEL ?? "").trim(),
 
   // FASE 5 — BD de la empresa (solo lectura). Vacío => consultas de datos deshabilitadas.
   companyDatabaseUrl: process.env.COMPANY_DATABASE_URL ?? "",

@@ -55,6 +55,23 @@ Lee también `PLAN.md`: allí están las fases y cuál es la ACTUAL.
 - No inventar: si no hay datos, se dice. Si el modelo falla, tarda o devuelve algo
   inválido: transferir a asesor.
 
+### 5.1 Proveedor de IA: la IA local sigue siendo la regla
+
+- El proveedor por defecto y el de PRODUCCIÓN en la empresa es el IA LOCAL
+  (Ollama): `LLM_PROVIDER=ollama` o la variable sin definir. No se cambia sin que
+  lo pida el dueño.
+- `LLM_PROVIDER=cloudflare` (Cloudflare Workers AI) es EXCLUSIVAMENTE para
+  pruebas con datos FICTICIOS (nivel gratuito). En el servidor de la empresa no
+  se usa.
+- RIESGO DE TERCEROS: con el proveedor Cloudflare, los prompts, el texto del
+  usuario y los datos de la BD salen del servidor de la empresa hacia Cloudflare.
+  Por eso solo se permite con datos ficticios. Antes de usarlo con datos reales
+  hay que avisar al dueño y decidir con él (tratamiento de datos, contrato,
+  normativa aplicable).
+- Nunca se registran en logs los prompts, las respuestas del modelo ni el token
+  de Cloudflare. Los errores del proveedor se traducen a mensajes controlados
+  (código HTTP + código de error), nunca con el contenido enviado o recibido.
+
 ## 6. Canales
 
 - El núcleo no depende de WhatsApp: todo pasa por el puerto `ChannelAdapter`

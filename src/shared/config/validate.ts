@@ -1,6 +1,7 @@
 import { parseAllowedOrigins, validateAllowedOrigins } from "./allowed-origins.js";
 import { parseFaqMinConfidence } from "./faq-min-confidence.js";
 import { isChannelMode, modeIncludesTelegram, modeIncludesWhatsapp, resolveChannelMode, splitChannelTokens } from "./channel-mode.js";
+import { isLlmProviderKind, resolveLlmProvider } from "./llm-provider.js";
 
 export interface MissingConfigEntry {
   key: string;
@@ -34,6 +35,12 @@ const TELEGRAM_WEBHOOK_SECRET_ENTRY: MissingConfigEntry = {
 };
 
 const TELEGRAM_WEBHOOK_SECRET_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
+
+const CLOUDFLARE_ENTRIES: MissingConfigEntry[] = [
+  { key: "CLOUDFLARE_ACCOUNT_ID", description: "ID de la cuenta de Cloudflare (Workers AI)" },
+  { key: "CLOUDFLARE_API_TOKEN", description: "Token de la API de Cloudflare Workers AI" },
+  { key: "LLM_MODEL", description: "Modelo de Workers AI (p. ej. @cf/meta/llama-3.2-3b-instruct)" },
+];
 
 function parsePositiveInt(value: string | undefined): { ok: boolean; value: number; raw: string } {
   const raw = value ?? "";
@@ -84,6 +91,8 @@ export function validateConfig(nodeEnv: string = process.env.NODE_ENV ?? "develo
   const companyQueryTimeout = parsePositiveInt(process.env.COMPANY_QUERY_TIMEOUT_MS);
   const companyMaxRows = parsePositiveInt(process.env.COMPANY_MAX_ROWS);
   const port = parsePort(process.env.PORT);
+  const llmProviderRaw = (process.env.LLM_PROVIDER ?? "").trim();
+  const llmProvider = resolveLlmProvider(process.env.LLM_PROVIDER);
 
   const faqIssues: MissingConfigEntry[] = faq.ok
     ? []
@@ -116,6 +125,17 @@ export function validateConfig(nodeEnv: string = process.env.NODE_ENV ?? "develo
     ...(llmTimeout.ok ? [] : [{ key: "LLM_TIMEOUT_MS", description: `Valor inválido "${llmTimeout.raw}". Debe ser un entero positivo` }]),
     ...(companyQueryTimeout.ok ? [] : [{ key: "COMPANY_QUERY_TIMEOUT_MS", description: `Valor inválido "${companyQueryTimeout.raw}". Debe ser un entero positivo` }]),
     ...(companyMaxRows.ok ? [] : [{ key: "COMPANY_MAX_ROWS", description: `Valor inválido "${companyMaxRows.raw}". Debe ser un entero positivo` }]),
+    // LLM_PROVIDER: "ollama" (IA local, por defecto) o "cloudflare" (Workers AI,
+    // SOLO para pruebas con datos ficticios).
+    ...(llmProviderRaw.length > 0 && !isLlmProviderKind(llmProviderRaw)
+      ? [{ key: "LLM_PROVIDER", description: `Valor inválido "${llmProviderRaw}". Los valores permitidos son: ollama, cloudflare` }]
+      : []),
+    // Con el proveedor Cloudflare, account id, token y modelo son obligatorios
+    // (en producción y también en desarrollo: si faltan, el bot no podría
+    // clasificar ni redactar y terminaría transfiriendo siempre a un asesor).
+    ...(llmProvider === "cloudflare"
+      ? CLOUDFLARE_ENTRIES.filter((entry) => !(process.env[entry.key] ?? "").trim())
+      : []),
   ];
   const portIssues: MissingConfigEntry[] = port.ok
     ? []

@@ -941,3 +941,99 @@ npm notice run tsc -p tsconfig.build.json --noEmit
    Start at  13:08:27
    Duration  42.80s (tests 67%, transform 18%, import 14%, worker 1%)
 ```
+
+---
+
+## Proveedor de IA en la nube para pruebas: Cloudflare Workers AI (Fase 5, incremento)
+
+Estado: **implementado y probado**. No cierra ninguna fase (la Fase 9 sigue en
+curso). La IA local (Ollama) **sigue siendo** el proveedor por defecto y el de
+producción en la empresa.
+
+### Qué se hizo
+
+1. `AGENTS.md` §5.1: la IA local sigue siendo la regla. `LLM_PROVIDER=cloudflare`
+   es **exclusivamente** para pruebas con datos ficticios, con el riesgo de
+   terceros anotado (el prompt, el texto del usuario y los datos de la BD salen
+   del servidor de la empresa hacia Cloudflare) y la prohibición de registrar
+   prompts, respuestas o token.
+2. `CloudflareLlmProvider` (`src/modules/chatbot/infrastructure/cloudflare-llm-provider.ts`):
+   `fetch` nativo (sin librerías nuevas) contra
+   `POST https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/{LLM_MODEL}`
+   con `Authorization: Bearer <CLOUDFLARE_API_TOKEN>`, timeout con
+   `LLM_TIMEOUT_MS` (AbortController), errores controlados (código HTTP + código
+   de error traducido, sin el contenido enviado/recibido ni el token) y parseo
+   tolerante de JSON (quita fences ```` ```json ````; si el JSON es inválido
+   lanza error y el bot transfiere a asesor).
+3. `createLlmProvider` (`src/modules/chatbot/infrastructure/create-llm-provider.ts`):
+   selecciona el adaptador según `LLM_PROVIDER`; con `cloudflare` y credenciales
+   incompletas falla al arrancar (fail fast) en vez de fallar en cada mensaje.
+4. Variables nuevas solo en `env.ts`, `.env.example` y `validate.ts`:
+   `LLM_PROVIDER` (`ollama` por defecto | `cloudflare`), `CLOUDFLARE_ACCOUNT_ID`,
+   `CLOUDFLARE_API_TOKEN` y `LLM_MODEL`. Con `LLM_PROVIDER=cloudflare` las tres
+   son obligatorias (en producción y en desarrollo). Con `ollama` nada cambia.
+5. `main.ts`: dentro del bloque `phase5` se elige el adaptador según
+   `LLM_PROVIDER`; el log de arranque muestra el proveedor (nunca el token).
+6. `QueryDataUseCase`: los datos de la BD se envían al modelo delimitados en
+   `<data>` y el texto del usuario en `<user_data>`, con la regla explícita de
+   que ambos son DATOS y nunca instrucciones. El modelo sigue recibiendo
+   **solo** lo que devolvió la herramienta autorizada para el usuario de la
+   sesión (y el `customer_id` siempre sale de la sesión, nunca del texto).
+
+### Archivos
+
+- Nuevos: `src/shared/config/llm-provider.ts`,
+  `src/modules/chatbot/infrastructure/cloudflare-llm-provider.ts`,
+  `src/modules/chatbot/infrastructure/create-llm-provider.ts`,
+  `src/shared/config/llm-provider.test.ts`,
+  `src/modules/chatbot/test/cloudflare-llm-provider.test.ts`.
+- Modificados: `AGENTS.md`, `.env.example`, `src/shared/config/env.ts`,
+  `src/shared/config/validate.ts`, `src/main.ts`,
+  `src/modules/chatbot/domain/llm-provider.ts` (nuevo `maxTokens` opcional),
+  `src/modules/chatbot/application/query-data-use-case.ts` (delimitación de
+  datos), `AUDIT.md`.
+
+### Cómo probarlo
+
+- `npm run typecheck` y `npm test`.
+- Test del proveedor: `src/modules/chatbot/test/cloudflare-llm-provider.test.ts`
+  (éxito, `response_format` en modelos con JSON Mode, instrucción JSON + parseo
+  tolerante en los que no lo tienen, JSON inválido, clasificador que deriva en
+  `PEDIR_HUMANO`, timeout, token ausente, 429 de cuota diaria sin filtrar token
+  ni prompt, respuesta ilegible, error de red y selección de proveedor).
+- Test de configuración: `src/shared/config/llm-provider.test.ts` (valor por
+  defecto `ollama`, inválido, y `validateConfig` exigiendo las tres variables con
+  `cloudflare`).
+- Prueba manual (SOLO datos ficticios): `LLM_PROVIDER=cloudflare`,
+  `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` y `LLM_MODEL` en el entorno;
+  con `COMPANY_DATABASE_URL` apuntando a la BD de demo. Sin credenciales, la
+  aplicación no arranca (fail fast).
+
+### Verificación (salida literal)
+
+`npm run typecheck`: exit 0.
+
+```text
+npm notice run chatbot-soporte-backend@0.1.0 typecheck
+npm notice run tsc -p tsconfig.build.json --noEmit
+```
+
+`npm test`: exit 0.
+
+```text
+ Test Files  53 passed (53)
+      Tests  451 passed (451)
+   Start at  14:00:27
+   Duration  19.45s (tests 73%, transform 19%, import 7%, worker 1%)
+```
+
+### Riesgos / pendientes
+
+- El proveedor Cloudflare envía el prompt y los datos a un tercero: solo con
+  datos ficticios. Antes de usarlo con datos reales hay que decidir con el
+  dueño (tratamiento de datos, contrato, normativa aplicable).
+- La cuota gratuita de Workers AI es de 10.000 neuronas/día (se agota rápido):
+  cuando se agota, la API responde 429 (código 3036) y el bot transfiere a
+  asesor sin caerse.
+- Sigue pendiente la decisión ya anotada en `PLAN.md` (Fase 9) sobre el
+  mapeo `customer_id` entre `company_users.id` y la BD de la empresa.
