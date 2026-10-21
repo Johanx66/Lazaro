@@ -43,4 +43,5 @@ EXPOSE 3000
 
 # Railway (y cualquier otro orquestador) ejecuta migrate deploy antes de arrancar
 # la app; DATABASE_URL llega del entorno.
-CMD ["sh", "-c", "prisma migrate deploy && node dist/main.js"]
+
+CMD ["sh", "-c", "node -e 'if (!process.env.DATABASE_URL) { console.error(\"ERROR: DATABASE_URL no está disponible en el contenedor\"); process.exit(1) } else { console.log(\"OK: DATABASE_URL está definida\") }' && prisma migrate deploy && node dist/main.js"]
