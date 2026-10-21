@@ -1,0 +1,156 @@
+# =============================================================================
+# docker-compose.company.yml — despliegue "todo en uno" para la empresa.
+#
+# Levanta el chatbot completo con su BD propia (Postgres), la IA local (Ollama)
+# y un contenedor de un solo uso que aplica migraciones y siembra el admin.
+# Incluye además una BD "de empresa" de demostración (opcional, perfil `demo`).
+#
+# Uso básico (CPU):
+#   cp .env.company.example .env.company
+#   # edita .env.company (dominio, tokens, contraseñas; NUNCA valores reales en el repo)
+#   docker compose -f docker-compose.company.yml --env-file .env.company up -d --build
+#   docker compose -f docker-compose.company.yml exec ollama ollama pull qwen2.5:7b-instruct
+#
+# Con GPU NVIDIA (requiere nvidia-container-toolkit instalado en el host):
+#   docker compose -f docker-compose.company.yml -f docker-compose.company.gpu.yml \
+#     --env-file .env.company up -d --build
+#
+# Con la BD de demostración de la empresa (opcional):
+#   docker compose -f docker-compose.company.yml --env-file .env.company \
+#     --profile demo up -d --build
+#
+# IMPORTANTE: este archivo reutiliza la imagen del Dockerfile del proyecto; el
+# servicio `migrate` aplica `prisma migrate deploy` y siembra el admin inicial.
+# =============================================================================
+
+services:
+  # --- Base de datos propia del chatbot (Postgres) ---
+  db:
+    image: postgres:16-alpine
+    container_name: chatbot_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chatbot_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en el .env de la empresa}
+      POSTGRES_DB: ${POSTGRES_DB:-chatbot_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chatbot_user} -d ${POSTGRES_DB:-chatbot_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # No se publica al exterior: solo la red interna de compose la alcanza.
+    expose:
+      - "5432"
+
+  # --- IA local (Ollama) ---
+  ollama:
+    image: ollama/ollama:latest
+    container_name: chatbot_ollama
+    restart: always
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # GPU: descomenta el bloque `deploy` (o usa docker-compose.company.gpu.yml).
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    expose:
+      - "11434"
+
+  # --- Migraciones + seed del admin inicial (una sola ejecución) ---
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: chatbot_migrate
+    command: sh -c "npx prisma migrate deploy && npx prisma db seed"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-chatbot_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chatbot_db}?schema=public
+      # Variables solo del seed (admin y usuario de empresa de ejemplo).
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      COMPANY_SEED_USERNAME: ${COMPANY_SEED_USERNAME:-}
+      COMPANY_SEED_PASSWORD: ${COMPANY_SEED_PASSWORD:-}
+      COMPANY_SEED_DISPLAY_NAME: ${COMPANY_SEED_DISPLAY_NAME:-}
+      COMPANY_SEED_PHONE: ${COMPANY_SEED_PHONE:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  # --- Aplicación (backend + paneles + webhooks) ---
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chatbot_app
+    restart: always
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    env_file:
+      - .env.company
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-chatbot_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chatbot_db}?schema=public
+      OLLAMA_BASE_URL: http://ollama:11434
+      # BD de la empresa: en modo demo apunta al contenedor demo; en real, a su servidor.
+      COMPANY_DATABASE_URL: ${COMPANY_DATABASE_URL:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # --- BD "de empresa" de DEMOSTRACIÓN (opcional, perfil `demo`) ---
+  # Crea el esquema empresa_demo + vistas + usuario de solo lectura con datos
+  # ficticios, usando scripts/demo-company-db.sql. Solo para pruebas.
+  company-demo-db:
+    image: postgres:16-alpine
+    container_name: chatbot_company_demo
+    profiles: ["demo"]
+    environment:
+      POSTGRES_USER: ${COMPANY_DEMO_ADMIN_USER:-company_admin}
+      POSTGRES_PASSWORD: ${COMPANY_DEMO_ADMIN_PASSWORD:?define COMPANY_DEMO_ADMIN_PASSWORD (solo demo)}
+      POSTGRES_DB: ${COMPANY_DEMO_DB:-company_demo}
+      # El script de initdb crea el usuario de solo lectura con esta contraseña
+      # (SOLO demo; nunca una credencial real). Debe coincidir con la de la
+      # COMPANY_DATABASE_URL del servicio app en modo demo.
+      COMPANY_READONLY_PASSWORD: ${COMPANY_READONLY_PASSWORD:-solo_demo_readonly}
+      READONLY_ROLE: ${COMPANY_READONLY_ROLE:-company_readonly}
+    volumes:
+      - company_demo_data:/var/lib/postgresql/data
+      - ./scripts/demo-company-db.sql:/docker-entrypoint-initdb.d/10-demo-company-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${COMPANY_DEMO_ADMIN_USER:-company_admin} -d ${COMPANY_DEMO_DB:-company_demo}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    expose:
+      - "5432"
+
+volumes:
+  postgres_data:
+  ollama_data:
+  company_demo_data:

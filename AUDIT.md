@@ -615,4 +615,70 @@ Tests nuevos: `src/shared/application/bootstrap-admin.test.ts` (6 casos: faltan 
 contraseña débil, ya existe admin, creación con hash/rol, email en minúsculas, no filtra
 contraseña).
 
+## Preparación para la entrega en servidor de empresa (IA local + BD de empresa)
+
+### Qué se hizo
+
+1. **`scripts/demo-company-db.sql`** (nuevo): BD "de empresa" de demostración en un
+   **esquema separado** (`empresa_demo`) con tablas ficticias (`customers`, `orders`),
+   las tres vistas del contrato (`v_customer_balance`, `v_orders_status`,
+   `v_recent_orders`) y un usuario de **solo lectura** (`GRANT SELECT` únicamente
+   sobre las vistas, `REVOKE` sobre las tablas base, `search_path` fijado al
+   esquema). La contraseña llega por variable (`-v readonly_password=...`) o por
+   entorno (`COMPANY_READONLY_PASSWORD`), nunca escrita en el archivo. Documenta el
+   contrato de columnas que la empresa debe mapear.
+2. **`docker-compose.company.yml`** (nuevo): app + Postgres (chatbot) + Ollama +
+   `migrate` (una sola ejecución, aplica migraciones y siembra el admin), con
+   healthchecks, volúmenes (`postgres_data`, `ollama_data`) y un servicio opcional
+   `company-demo-db` bajo el perfil `demo` (carga el SQL anterior vía
+   `docker-entrypoint-initdb.d`). `.env.company` para las variables.
+3. **`docker-compose.company.gpu.yml`** (nuevo): override para GPU NVIDIA
+   (`nvidia-container-toolkit`); sin él, Ollama corre en CPU.
+4. **`.env.company.example`** (nuevo): plantilla comentada, sin valores reales.
+5. **`docs/INSTALACION-EMPRESA.md`** (nuevo): guía de TI — hardware, software, dominio
+   HTTPS/puertos, puesta en marcha (CPU y GPU), descarga del modelo, variables,
+   registro del webhook de Telegram, usuario de solo lectura, respaldos y
+   actualización, incluido el contrato de vistas.
+6. **`.gitignore`**: excepción `!.env.company.example` (el `.env.company` real sigue
+   ignorado).
+7. **`src/modules/chatbot/test/company-db-contract.test.ts`** (nuevo): verifica que
+   el SQL real de las herramientas coincide con las vistas/columnas documentadas y
+   que el script de demo define esas vistas y otorga SELECT solo sobre ellas.
+
+### Cómo probarlo
+
+- Local: `docker compose up -d db` (o `npm run dev:all`), Ollama en el host
+  (`ollama serve` + `ollama pull qwen2.5:7b-instruct`), backend `npm run dev`, y BD
+  de demo con `--profile demo` (ver `docs/INSTALACION-EMPRESA.md`, sección 7).
+- Empresa: `docker compose -f docker-compose.company.yml --env-file .env.company up -d --build`
+  y luego `exec ollama ollama pull <modelo>`.
+
+### Verificación (salida literal)
+
+`npm run typecheck`: exit 0.
+
+```text
+npm notice run chatbot-soporte-backend@0.1.0 typecheck
+npm notice run tsc -p tsconfig.build.json --noEmit
+```
+
+`npm test`: exit 0.
+
+```text
+npm notice run chatbot-soporte-backend@0.1.0 test
+npm notice run vitest run
+
+ RUN  v5.0.1 C:/Users/Wilso/Downloads/todo menos ultima fase (en teoria)/prueba/Chatbot-Juan/Chatbot-main
+
+
+ Test Files  48 passed (48)
+      Tests  402 passed (402)
+   Start at  23:39:47
+   Duration  26.76s (tests 74%, import 15%, transform 10%, worker 1%)
+```
+
+Nota: no se pudo validar el SQL ni los compose contra Docker/Postgres reales en este
+entorno (daemon no disponible); la validación del contrato se hace por test sobre el
+SQL de las herramientas y el archivo de demo.
+
 

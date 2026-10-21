@@ -7,3 +7,4 @@ src/generated/
 .pglite-data*/
 .env.*
 !.env.example
+!.env.company.example

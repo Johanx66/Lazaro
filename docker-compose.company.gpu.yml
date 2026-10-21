@@ -1,0 +1,23 @@
+# =============================================================================
+# docker-compose.company.gpu.yml — override para acelerar Ollama con GPU NVIDIA.
+#
+# Requiere en el host:
+#   * Driver NVIDIA + nvidia-container-toolkit instalados.
+#   * Verificado con: docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
+#
+# Uso:
+#   docker compose -f docker-compose.company.yml -f docker-compose.company.gpu.yml \
+#     --env-file .env.company up -d --build
+#
+# Si no hay GPU, NO uses este archivo: Ollama funcionará en CPU (más lento).
+# =============================================================================
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
