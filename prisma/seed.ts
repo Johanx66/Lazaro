@@ -1,8 +1,10 @@
 import "dotenv/config";
+import { readFile } from "node:fs/promises";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { env } from "../src/shared/config/env.js";
 import { Argon2PasswordHasher } from "../src/shared/infrastructure/argon2-password-hasher.js";
+import { mapPqrsDatasets } from "./pqrs-articles.js";
 import { seedAdmin } from "./seed-admin.js";
 import { seedCompanyUser } from "./seed-company-user.js";
 
@@ -51,8 +53,20 @@ async function seedArticles(): Promise<void> {
   console.log(`Seed aplicado: ${articleExamples.length} artículos ficticios creados.`);
 }
 
+async function seedPqrsArticles(): Promise<void> {
+  const [firstJson, secondJson] = await Promise.all([
+    readFile(new URL("./data/base_pqrs_chatbot_500.json", import.meta.url), "utf8"),
+    readFile(new URL("./data/pqrs_chatbot_base_conocimiento.json", import.meta.url), "utf8"),
+  ]);
+  const articles = mapPqrsDatasets(JSON.parse(firstJson) as unknown, JSON.parse(secondJson) as unknown);
+  const result = await prisma.knowledgeArticle.createMany({ data: articles, skipDuplicates: true });
+  const inactive = articles.filter((article) => !article.active).length;
+  console.log(`Seed PQRS: ${result.count} artículos nuevos; ${inactive} quedan inactivos para revisión.`);
+}
+
 async function main(): Promise<void> {
   await seedArticles();
+  await seedPqrsArticles();
   const hasher = new Argon2PasswordHasher();
   // El admin no depende de si ya había artículos.
   await seedAdmin(prisma, hasher, {
