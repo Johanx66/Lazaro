@@ -38,12 +38,19 @@
             Estas son las cuentas que se autentican desde el chat (nunca por el chat).
             La contraseña se guarda cifrada; no se muestra aquí.
           </p>
+          <p class="hint">
+            El <strong>código de cliente</strong> es el identificador con el que la cuenta
+            aparece en la base de datos de la empresa (por ejemplo <code>CLI-000123</code>).
+            Es lo que permite al bot mostrar saldo y pedidos: si se deja vacío, el usuario
+            queda sin vincular y sus consultas de datos se deniegan.
+          </p>
 
           <form id="userForm" class="filters" novalidate>
             <input id="uUsername" type="text" placeholder="usuario" maxlength="60" />
             <input id="uDisplayName" type="text" placeholder="Nombre para mostrar" maxlength="120" />
             <input id="uPassword" type="password" placeholder="Contraseña (mínimo 12)" autocomplete="new-password" />
             <input id="uPhone" type="text" placeholder="Teléfono registrado (opcional)" maxlength="40" />
+            <input id="uCompanyCustomerId" type="text" placeholder="Código de cliente (opcional, ej. CLI-000123)" maxlength="64" />
             <select id="uRole">
               <option value="USER">Usuario</option>
               <option value="ADMIN">Administrador</option>

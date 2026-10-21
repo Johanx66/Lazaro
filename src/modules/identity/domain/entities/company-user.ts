@@ -8,6 +8,12 @@ export interface CompanyUser {
   role: CompanyRole;
   active: boolean;
   registeredPhone: string | null;
+  /**
+   * Código de cliente en la BD de la empresa (p. ej. "CLI-000123"). Es la clave con
+   * la que el chatbot filtra las consultas de datos. NUNCA es el id interno del bot.
+   * `null` = cliente todavía no vinculado a ningún cliente de la BD de la empresa.
+   */
+  companyCustomerId: string | null;
   failedAttempts: number;
   lockedUntil: Date | null;
   createdAt: Date;
@@ -22,6 +28,8 @@ export interface PublicCompanyUser {
   role: CompanyRole;
   active: boolean;
   registeredPhone: string | null;
+  /** Código de cliente en la BD de la empresa, o null si todavía no está vinculado. */
+  companyCustomerId: string | null;
   createdAt: Date;
 }
 
@@ -31,6 +39,8 @@ export interface CreateCompanyUserInput {
   displayName: string;
   role: CompanyRole;
   registeredPhone: string | null;
+  /** Código de cliente en la BD de la empresa (ya validado y normalizado). */
+  companyCustomerId?: string | null;
 }
 
 export interface UpdateCompanyUserInput {
@@ -38,6 +48,8 @@ export interface UpdateCompanyUserInput {
   role?: CompanyRole;
   active?: boolean;
   registeredPhone?: string | null;
+  /** Código de cliente en la BD de la empresa (ya validado y normalizado). */
+  companyCustomerId?: string | null;
   passwordHash?: string;
 }
 
@@ -49,6 +61,7 @@ export function toPublicCompanyUser(user: CompanyUser): PublicCompanyUser {
     role: user.role,
     active: user.active,
     registeredPhone: user.registeredPhone,
+    companyCustomerId: user.companyCustomerId,
     createdAt: user.createdAt,
   };
 }

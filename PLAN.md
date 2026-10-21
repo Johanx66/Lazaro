@@ -19,7 +19,7 @@ Reglas: ver `AGENTS.md`. Se trabaja UNA fase a la vez.
 | 6 | Despliegue en el servidor de la empresa | **COMPLETADA** |
 | 7 | WhatsApp real | **pendiente** |
 | 8 | Canal Telegram (webhook de la Bot API) | **COMPLETADA** |
-| 9 | Puerta de verificación obligatoria (todo contacto sin sesión recibe el mensaje estático y el enlace; cero IA) | **EN CURSO** — puerta y revocación por cambio de teléfono implementadas; revisión de permisos hecha. Quedan 4 decisiones funcionales del dueño (rol ADMIN en el chat, mapeo `customer_id`, PQRS en el chat, configuración de Telegram) |
+| 9 | Puerta de verificación obligatoria (todo contacto sin sesión recibe el mensaje estático y el enlace; cero IA) | **EN CURSO** — puerta y revocación por cambio de teléfono implementadas; revisión de permisos hecha. El mapeo `customer_id` está DECIDIDO e implementado (columna `company_users.companyCustomerId` + scripts de la BD de prueba de Lázaro Software). Quedan 3 decisiones funcionales del dueño (rol ADMIN en el chat, PQRS en el chat, configuración de Telegram) |
 
 Nota: todavía no hay número de WhatsApp. Todo se desarrolla y prueba con el chat web
 simulado. WhatsApp se conecta al final como un adaptador más.
@@ -322,6 +322,14 @@ obligatoria"):
 
 1. **Reenvío de enlaces:** se mantiene el diseño "solo hash" (el enlace **no** se
    reenvía; hay que esperar al TTL, 10 min por defecto). No se implementa A, B ni C.
+2. **Mapeo de `customer_id`:** la empresa usa **su propio código de cliente**, no el
+   `id` interno del bot. Se añadió la columna única `company_users.companyCustomerId`
+   (migración `0006`), el ADMIN la asigna desde el panel ("Código de cliente") y las
+   tres herramientas filtran por ese código, que sale siempre de la sesión. Un
+   cliente sin código no puede consultar datos: se deniega con un mensaje fijo,
+   sin llamada al modelo y sin transferencia. La BD de prueba de Lázaro Software
+   (datos ficticios) se carga con `scripts/lazaro-test-db/` (detalle y salida
+   literal en `AUDIT.md` → "Mapeo `customer_id`").
 
 **Pendiente de mi decisión (preguntas concretas y solución mínima propuesta en
 `AUDIT.md`):**
@@ -330,9 +338,8 @@ obligatoria"):
    chat, incluida una cuenta con `role = ADMIN` (empleado). Si un `ADMIN` no debe
    poder actuar como cliente, la regla mínima es un solo punto de comprobación
    (`CHAT_LOGIN_ALLOWED_ROLES` en `policy.ts`) sin tocar el esquema.
-2. **Mapeo de `customer_id`:** las herramientas filtran por `company_users.id`; la
-   empresa debe poblar sus vistas con ese id (o, si usa su propio código de cliente,
-   hace falta una columna de correspondencia: cambio de esquema con migración).
+2. ~~**Mapeo de `customer_id`:**~~ **DECIDIDO** (ver arriba): columna
+   `company_users.companyCustomerId` con el código de cliente de la empresa.
 3. **PQRS en el chat:** hoy no existe funcionalidad de PQRS; los mensajes de ese tipo
    terminan en transferencia a asesor y el cliente no puede consultar su radicado.
    Si debe poder verlo, la vía mínima es una herramienta de solo lectura aislada por

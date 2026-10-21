@@ -91,7 +91,7 @@ interface Spies {
 }
 
 function makeUseCase(options: {
-  getActivePrincipal: () => Promise<{ companyUserId: string; displayName: string; role: "USER" } | null>;
+  getActivePrincipal: () => Promise<{ companyUserId: string; displayName: string; role: "USER"; companyCustomerId: string | null } | null>;
   identity?: boolean;
 } ): { useCase: ProcessIncomingMessageUseCase; spies: Spies } {
   const classify = vi.fn(async () => ({ intent: "FAQ" as const }));
@@ -169,7 +169,7 @@ describe("ProcessIncomingMessageUseCase — puerta de verificación obligatoria"
 
   it("con sesión vigente el flujo NO se bloquea y el clasificador sí se ejecuta", async () => {
     const { useCase, spies } = makeUseCase({
-      getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+      getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER", companyCustomerId: "CLI-000001" }),
     });
 
     const result = await useCase.execute({

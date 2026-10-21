@@ -39,6 +39,9 @@ export const createCompanyUserSchema = z.object({
   displayName: z.string().trim().min(1).max(MAX_DISPLAY_NAME_LENGTH),
   role: z.enum(["USER", "ADMIN"]).optional(),
   registeredPhone: z.string().trim().max(40).nullable().optional(),
+  // Código de cliente en la BD de la empresa. Vacío/null => sin vincular.
+  // El formato exacto se valida en el caso de uso con el patrón configurado.
+  companyCustomerId: z.string().trim().max(64).nullable().optional(),
 });
 
 export type CreateCompanyUserBody = z.infer<typeof createCompanyUserSchema>;
@@ -60,6 +63,9 @@ export const updateCompanyUserSchema = z
     role: z.enum(["USER", "ADMIN"]).optional(),
     active: z.boolean().optional(),
     registeredPhone: z.string().trim().max(40).nullable().optional(),
+    // Código de cliente en la BD de la empresa. `null` o "" => quitar el vínculo.
+    // El formato exacto se valida en el caso de uso con el patrón configurado.
+    companyCustomerId: z.string().trim().max(64).nullable().optional(),
   })
   .strict();
 

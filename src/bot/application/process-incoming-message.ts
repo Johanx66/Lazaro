@@ -32,13 +32,19 @@ export interface ChatSessionPrincipal {
   companyUserId: string;
   displayName: string;
   role: CompanyRole;
+  /**
+   * Código de cliente en la BD de la empresa (p. ej. "CLI-000123"). Viene de la
+   * sesión; es la única clave con la que se filtran las consultas de datos.
+   * `null` = cliente sin vincular: sus consultas de datos se deniegan.
+   */
+  companyCustomerId: string | null;
 }
 
 /** Puerto de consulta de datos de la empresa. Lo implementa `modules/chatbot`. */
 export interface DataQueryPort {
   execute(
     text: string,
-    session: { companyUserId: string; role: CompanyRole },
+    session: { companyUserId: string; role: CompanyRole; companyCustomerId: string | null },
   ): Promise<{ reply: string; handoffRequired?: boolean }>;
 }
 
@@ -419,6 +425,7 @@ export class ProcessIncomingMessageUseCase {
     const result = await dataQuery.execute(text, {
       companyUserId: principal.companyUserId,
       role: principal.role,
+      companyCustomerId: principal.companyCustomerId,
     });
 
     if (result.handoffRequired) {

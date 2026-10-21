@@ -1037,3 +1037,122 @@ npm notice run tsc -p tsconfig.build.json --noEmit
   asesor sin caerse.
 - Sigue pendiente la decisión ya anotada en `PLAN.md` (Fase 9) sobre el
   mapeo `customer_id` entre `company_users.id` y la BD de la empresa.
+
+---
+
+## Mapeo `customer_id`: código de cliente de la BD de la empresa (Fase 9, decisión 2 tomada)
+
+Estado: **implementado y probado**. Cierra la decisión nº 2 de la revisión de
+permisos ("¿la empresa va a poblar sus vistas con `company_users.id` o va a mapear
+su código de cliente propio?"). La Fase 9 sigue en curso por las otras tres
+decisiones (rol `ADMIN` en el chat, PQRS en el chat y configuración de Telegram).
+
+### Qué se hizo
+
+**Decisión del dueño del proyecto:** la empresa usa **su propio código de cliente**
+(en la BD de prueba de Lázaro Software: `CLI-000123`), NO el `id` interno del bot.
+Se añadió por eso una columna propia y única en `company_users`.
+
+1. **Esquema (migración versionada `0006_company_user_customer_id`)**:
+   `CompanyUser.companyCustomerId String? @unique`. Es única (dos cuentas de empresa
+   no pueden apuntar al mismo cliente) y admite varios `NULL` (clientes aún no
+   vinculados). El índice único de la base de datos es la garantía final.
+2. **Dominio** (`src/modules/identity/domain/customer-code.ts`): patrón de
+   validación (por defecto `^[A-Z0-9][A-Z0-9_-]{1,31}$`), normalización a
+   mayúsculas y recorte, longitud máxima 32 y resultado tipado
+   (`empty` | `too_long` | `format`). Si el patrón configurado no es una expresión
+   regular válida se usa el de por defecto (un patrón mal puesto no deja sin poder
+   asignar códigos) y `validateConfig` avisa de la incidencia.
+3. **Aplicación** (`src/modules/identity/application/company-customer-code.ts`):
+   `resolveCompanyCustomerId()` valida, normaliza y comprueba que el código esté
+   libre; devuelve `CompanyCustomerIdTakenError` (409) si ya está asignado a **otro**
+   usuario e `InvalidCompanyCustomerIdError` (400) si el formato no vale.
+4. **Casos de uso**: `CreateCompanyUserUseCase` y `UpdateCompanyUserUseCase` aceptan
+   `companyCustomerId` (en `Update`, `null` o "" **quita** el vínculo). Solo un
+   ADMIN llega a ellos (`requireRole("ADMIN")` en la API y sesión de admin en el
+   panel).
+5. **Panel** (`public/admin/identity.html` + `identity.js`): campo "Código de
+   cliente" al crear y al editar un usuario; la lista muestra el código o
+   "sin vinculado".
+6. **Propagación a la sesión**: `ChatSessionOwner.companyCustomerId` →
+   `getActivePrincipal` → `ChatSessionPrincipal.companyCustomerId` →
+   `DataQuerySession.companyCustomerId`. El código sale **siempre** de la sesión,
+   nunca del texto del usuario ni de lo que elige el modelo.
+7. **Herramientas** (`ToolContext`): `companyCustomerId` sustituye a
+   `authenticatedUserId`. Las tres herramientas filtran igual que antes, pero ahora
+   por el **código de cliente**:
+   - `get_customer_balance` → `WHERE customer_id = $1`
+   - `get_order_status` → `WHERE order_id = $1 AND customer_id = $2`
+   - `get_recent_orders` → `WHERE customer_id = $1 ORDER BY created_at DESC LIMIT $2`
+8. **Cliente sin vincular → denegación sin IA**: `QueryDataUseCase.execute` comprueba
+   el código **antes de cualquier llamada al modelo** y responde con un texto fijo
+   (`CUSTOMER_NOT_LINKED_REPLY`), sin herramienta, sin SQL y **sin transferencia a
+   asesor**. La auditoría registra que el vínculo existe o no, **nunca el valor**
+   del código.
+9. **Auditoría**: acción `COMPANY_CUSTOMER_ID_CHANGED` con
+   `metadata.assigned = true|false` (sin el código), y `COMPANY_USER_CREATED` con
+   `metadata.companyCustomerIdAssigned`. El valor del código no se escribe en la
+   auditoría ni en los logs.
+10. **BD de prueba de Lázaro Software** (`scripts/lazaro-test-db/`): scripts
+    adaptados del paquete original (esquema sin `DROP`, datos ficticios, las tres
+    vistas del chatbot y el rol de solo lectura con `GRANT SELECT` únicamente
+    sobre esas vistas). El volcado de 22 MB no se integra: los scripts regeneran
+    los mismos datos. **Todos los datos son ficticios** (se generan con
+    `random()`).
+
+### Archivos
+
+- Nuevos: `prisma/migrations/0006_company_user_customer_id/migration.sql`,
+  `src/modules/identity/domain/customer-code.ts`,
+  `src/modules/identity/application/company-customer-code.ts`,
+  `src/modules/identity/tests/company-customer-id.test.ts`,
+  `src/shared/config/customer-id-pattern.test.ts`,
+  `scripts/lazaro-test-db/` (`README.md`, `01-esquema.sql`, `02-datos.sql`,
+  `03-vistas-chatbot.sql`, `04-roles-lectura.sql`, `cargar.sh`).
+- Modificados: `prisma/schema.prisma`, `src/modules/identity/domain/entities/company-user.ts`,
+  `src/modules/identity/domain/entities/chat-session.ts`,
+  `src/modules/identity/domain/repositories/company-user-repository.ts`,
+  `src/modules/identity/infrastructure/prisma-company-user-repository.ts`,
+  `src/modules/identity/infrastructure/prisma-chat-session-repository.ts`,
+  `src/modules/identity/application/errors.ts`,
+  `src/modules/identity/application/validation.ts`,
+  `src/modules/identity/application/use-cases/create-company-user.ts`,
+  `src/modules/identity/application/use-cases/update-company-user.ts`,
+  `src/modules/identity/presentation/company-user-controller.ts`,
+  `src/modules/identity/index.ts`, `src/modules/identity/tests/in-memory-identity-repository.ts`,
+  `src/bot/application/process-incoming-message.ts`,
+  `src/modules/chatbot/application/query-data-use-case.ts`,
+  `src/modules/chatbot/tools/tool-registry.ts` y las tres herramientas,
+  `src/shared/config/env.ts`, `src/shared/config/validate.ts`, `src/main.ts`,
+  `.env.example`, `public/admin/identity.html`, `public/admin/identity.js`.
+
+### Cómo probarlo
+
+- `npm run typecheck` y `npm test`.
+- `src/modules/identity/tests/company-customer-id.test.ts`: formato y normalización,
+  rechazo de formato inválido, código repetido (409), reasignación al mismo
+  usuario, `null` quita el vínculo, la auditoría **no** guarda el valor del código y
+  el código viaja a la sesión de chat.
+- `src/modules/chatbot/test/phase5.test.ts` (tests 9 y 10): cliente sin vincular →
+  respuesta fija **sin llamadas al modelo ni a la BD**; con cliente vinculado el
+  filtro es el código de la sesión.
+- `src/modules/chatbot/test/company-db-contract.test.ts`: las tres herramientas
+  filtran por el código de cliente y el SQL sigue sin esquema cualificado.
+- `src/shared/config/customer-id-pattern.test.ts`: patrón por defecto, patrón
+  configurado y patrón inválido (incidencia en `validateConfig`).
+- Carga de la BD de prueba: `bash scripts/lazaro-test-db/cargar.sh` (ver el README
+  de esa carpeta) y, en el panel, asignar `CLI-000123` a un usuario.
+
+### Riesgos / pendientes
+
+- **El clasificador de intención se ejecuta antes** de la denegación por falta de
+  código: la ruta de *consulta de datos* no llama al modelo (cero inferencias),
+  pero el botón de "clasificación" que decide si el mensaje es una consulta, una
+  FAQ o una PQRS sí se ejecuta. Denegar antes del clasificador impediría las FAQ a
+  los clientes sin vincular. Si se quiere **cero IA** también en ese punto, hay que
+  decidirlo (implicaría quitar las FAQ a los clientes sin código).
+- La migración `0006` hay que aplicarla en el servidor (`npm run prisma:deploy`)
+  antes de arrancar la versión nueva.
+- Sigue pendiente del dueño: la carga de la BD de prueba en el segundo servicio
+  Postgres de Railway (el `COMPANY_DATABASE_URL` concreto) y la decisión de qué
+  cuentas de la demo quedan vinculadas a qué `CLI-XXXXXX`.

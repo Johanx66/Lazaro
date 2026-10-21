@@ -120,6 +120,7 @@ describe("cambio de teléfono registrado del cliente", () => {
           companyUserId: found.owner.id,
           displayName: found.owner.displayName,
           role: found.owner.role,
+          companyCustomerId: found.owner.companyCustomerId,
         };
       },
       startLogin: async () => ({ status: "issued" as const, url: LOGIN_URL }),

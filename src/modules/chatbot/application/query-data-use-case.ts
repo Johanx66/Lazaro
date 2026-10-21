@@ -8,12 +8,26 @@ import type { ToolRegistry } from '../tools/tool-registry.js';
 export interface DataQuerySession {
   companyUserId: string;
   role: CompanyRole;
+  /**
+   * Código de cliente en la BD de la empresa (p. ej. "CLI-000123"). Viene de la
+   * sesión. Si es `null`, el cliente no está vinculado y la consulta se deniega
+   * sin llamar al modelo.
+   */
+  companyCustomerId: string | null;
 }
 
 export interface DataQueryResult {
   reply: string;
   handoffRequired?: boolean;
 }
+
+/**
+ * Respuesta controlada para un cliente sin vincular. Es un texto fijo: no se
+ * genera con el modelo, así que no hay ninguna inferencia.
+ */
+export const CUSTOMER_NOT_LINKED_REPLY =
+  "Tu cuenta todavía no está vinculada a un cliente de la empresa, por eso no puedo mostrarte " +
+  "información de tus pedidos o de tu saldo. Pide al administrador que la vincule.";
 
 export const ToolCallSelectionSchema = z.object({
   toolName: z.string(),
@@ -29,6 +43,13 @@ export class QueryDataUseCase {
   ) {}
 
   async execute(userInput: string, session: DataQuerySession): Promise<DataQueryResult> {
+    // 0. Cliente no vinculado a ningún cliente de la BD de la empresa: se deniega la
+    //    consulta SIN llamar al modelo (cero inferencias). El id interno del bot
+    //    nunca se usa como código de cliente.
+    if (session.companyCustomerId === null || session.companyCustomerId.length === 0) {
+      return { reply: CUSTOMER_NOT_LINKED_REPLY };
+    }
+
     // 1. Herramientas disponibles según el rol del usuario autenticado (la sesión
     //    activa la garantiza el bot; aquí nunca se ejecuta sin identidad real).
     const availableTools = this.toolRegistry.getAllForRole(session.role);
@@ -82,12 +103,13 @@ Responde ÚNICAMENTE en formato JSON con la estructura:
       return { reply: 'Los parámetros especificados para la consulta son inválidos.' };
     }
 
-    // 5. Ejecución parametrizada (aislamiento por usuario autenticado desde la sesión).
+    // 5. Ejecución parametrizada (aislamiento por cliente: el código de cliente
+    //    sale SIEMPRE de la sesión, nunca del texto del usuario ni del modelo).
     let queryData: unknown;
     try {
       queryData = await tool.execute(
         parsedParams.data,
-        { authenticatedUserId: session.companyUserId, userRole: session.role },
+        { companyCustomerId: session.companyCustomerId, userRole: session.role },
         this.companyDb,
       );
     } catch {

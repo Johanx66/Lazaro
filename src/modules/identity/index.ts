@@ -52,6 +52,11 @@ export interface WireIdentityOptions {
   trustedOrigins: string[];
   /** Avisa al usuario por su canal cuando inicia sesión. */
   notifier: ChatNotifier;
+  /**
+   * Patrón que debe cumplir el código de cliente de la BD de la empresa. Vacío =>
+   * patrón por defecto.
+   */
+  companyCustomerIdPattern?: string;
 }
 
 export interface IdentityServices {
@@ -101,13 +106,19 @@ export function wireIdentity(
     skipPhoneMatchForTelegram: options.skipPhoneMatchForTelegram,
   });
   const logoutChat = new LogoutChatUseCase({ sessions, audit });
-  const createCompanyUser = new CreateCompanyUserUseCase({ repository: companyUsers, hasher, audit });
+  const createCompanyUser = new CreateCompanyUserUseCase({
+    repository: companyUsers,
+    hasher,
+    audit,
+    companyCustomerIdPattern: options.companyCustomerIdPattern,
+  });
   const listCompanyUsers = new ListCompanyUsersUseCase({ repository: companyUsers });
   const updateCompanyUser = new UpdateCompanyUserUseCase({
     repository: companyUsers,
     hasher,
     audit,
     sessions,
+    companyCustomerIdPattern: options.companyCustomerIdPattern,
   });
   const listChatSessions = new ListChatSessionsUseCase({ sessions });
   const revokeChatSession = new RevokeChatSessionUseCase({ sessions, audit });
@@ -151,6 +162,7 @@ export function wireIdentity(
         companyUserId: found.owner.id,
         displayName: found.owner.displayName,
         role: found.owner.role,
+        companyCustomerId: found.owner.companyCustomerId,
       };
     },
     async startLogin(channel: ChatChannel, contactId: string): Promise<LoginLinkDelivery> {

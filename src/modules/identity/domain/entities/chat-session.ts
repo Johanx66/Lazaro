@@ -25,6 +25,12 @@ export interface ChatSessionOwner {
   active: boolean;
   /** Bloqueo temporal por intentos fallidos; si está vigente, el cliente no está autorizado. */
   lockedUntil: Date | null;
+  /**
+   * Código de cliente en la BD de la empresa (p. ej. "CLI-000123"). Sale de la
+   * sesión y es la ÚNICA clave con la que se filtran las consultas de datos.
+   * `null` = cliente sin vincular: sus consultas de datos se deniegan.
+   */
+  companyCustomerId: string | null;
 }
 
 export interface ChatSessionWithOwner {

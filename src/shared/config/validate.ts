@@ -76,6 +76,15 @@ function parseBooleanEnv(value: string | undefined): { ok: boolean; raw: string 
   return normalized === "true" || normalized === "false" ? { ok: true, raw } : { ok: false, raw };
 }
 
+function isValidRegExp(pattern: string): boolean {
+  try {
+    new RegExp(pattern);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function validateConfig(nodeEnv: string = process.env.NODE_ENV ?? "development"): MissingConfigEntry[] {
   const mode = resolveChannelMode(process.env.CHANNEL_MODE, nodeEnv);
   const faq = parseFaqMinConfidence(process.env.FAQ_MIN_CONFIDENCE);
@@ -93,6 +102,7 @@ export function validateConfig(nodeEnv: string = process.env.NODE_ENV ?? "develo
   const port = parsePort(process.env.PORT);
   const llmProviderRaw = (process.env.LLM_PROVIDER ?? "").trim();
   const llmProvider = resolveLlmProvider(process.env.LLM_PROVIDER);
+  const customerIdPatternRaw = (process.env.COMPANY_CUSTOMER_ID_PATTERN ?? "").trim();
 
   const faqIssues: MissingConfigEntry[] = faq.ok
     ? []
@@ -125,6 +135,16 @@ export function validateConfig(nodeEnv: string = process.env.NODE_ENV ?? "develo
     ...(llmTimeout.ok ? [] : [{ key: "LLM_TIMEOUT_MS", description: `Valor inválido "${llmTimeout.raw}". Debe ser un entero positivo` }]),
     ...(companyQueryTimeout.ok ? [] : [{ key: "COMPANY_QUERY_TIMEOUT_MS", description: `Valor inválido "${companyQueryTimeout.raw}". Debe ser un entero positivo` }]),
     ...(companyMaxRows.ok ? [] : [{ key: "COMPANY_MAX_ROWS", description: `Valor inválido "${companyMaxRows.raw}". Debe ser un entero positivo` }]),
+    // Patrón del código de cliente de la BD de la empresa: si está vacío se usa el
+    // patrón por defecto; si tiene valor, debe ser una expresión regular válida.
+    ...(customerIdPatternRaw.length === 0 || isValidRegExp(customerIdPatternRaw)
+      ? []
+      : [
+          {
+            key: "COMPANY_CUSTOMER_ID_PATTERN",
+            description: `Valor inválido "${customerIdPatternRaw}". Debe ser una expresión regular válida`,
+          },
+        ]),
     // LLM_PROVIDER: "ollama" (IA local, por defecto) o "cloudflare" (Workers AI,
     // SOLO para pruebas con datos ficticios).
     ...(llmProviderRaw.length > 0 && !isLlmProviderKind(llmProviderRaw)

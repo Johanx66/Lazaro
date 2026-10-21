@@ -30,6 +30,7 @@ export class CompanyUserController {
       displayName: body.displayName,
       role: body.role ?? "USER",
       registeredPhone: body.registeredPhone ?? null,
+      companyCustomerId: body.companyCustomerId ?? null,
       adminId: requireAdminId(req),
       ip: clientIp(req),
     });
@@ -44,6 +45,9 @@ export class CompanyUserController {
       ...(body.role !== undefined ? { role: body.role } : {}),
       ...(body.active !== undefined ? { active: body.active } : {}),
       ...(body.registeredPhone !== undefined ? { registeredPhone: body.registeredPhone } : {}),
+      ...(body.companyCustomerId !== undefined
+        ? { companyCustomerId: body.companyCustomerId === "" ? null : body.companyCustomerId }
+        : {}),
       ...(body.password !== undefined ? { password: body.password } : {}),
       adminId: requireAdminId(req),
       ip: clientIp(req),

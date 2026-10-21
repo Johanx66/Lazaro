@@ -61,7 +61,7 @@ function makeIdentity(overrides: Partial<ChatIdentityPort> = {}): ChatIdentityPo
   return {
     getActiveSessionName: async () => null,
     // Por defecto VERIFICADO; los casos sin sesión lo sobrescriben con null.
-    getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+    getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER", companyCustomerId: "CLI-000001" }),
     startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
     logout: async () => undefined,
     ...overrides,
@@ -112,13 +112,17 @@ describe("ProcessIncomingMessageUseCase — enrutado por clasificador (Fase 5)",
       classifier: { classify: async () => ({ intent: "CONSULTA_DATOS" }) },
       dataQuery: { execute },
       identity: makeIdentity({
-        getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+        getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER", companyCustomerId: "CLI-000001" }),
       }),
     });
 
     const result = await useCase.execute(inbound("cuál es mi saldo"));
 
-    expect(execute).toHaveBeenCalledWith("cuál es mi saldo", { companyUserId: "u1", role: "USER" });
+    expect(execute).toHaveBeenCalledWith("cuál es mi saldo", {
+      companyUserId: "u1",
+      role: "USER",
+      companyCustomerId: "CLI-000001",
+    });
     expect(result.reply).toBe("Tu saldo es 10");
     expect(result.handledByBot).toBe(true);
   });
@@ -131,7 +135,7 @@ describe("ProcessIncomingMessageUseCase — enrutado por clasificador (Fase 5)",
       classifier: { classify: async () => ({ intent: "CONSULTA_DATOS" }) },
       dataQuery: { execute },
       identity: makeIdentity({
-        getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+        getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER", companyCustomerId: "CLI-000001" }),
       }),
     });
 

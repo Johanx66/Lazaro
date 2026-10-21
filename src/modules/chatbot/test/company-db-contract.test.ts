@@ -38,12 +38,12 @@ describe("Contrato de la BD de la empresa (Fase 5) con el script de demostració
     const { sql, params } = await captureSql(
       getCustomerBalanceTool,
       {},
-      { authenticatedUserId: "usr_101" },
+      { companyCustomerId: "CLI-000123", userRole: "USER" },
     );
     expect(sql).toMatch(/FROM\s+v_customer_balance/i);
     expect(sql).toMatch(/customer_id\s*,\s*balance\s*,\s*credit_limit/i);
     expect(sql).toMatch(/WHERE\s+customer_id\s*=\s*\$1/i);
-    expect(params).toEqual(["usr_101"]);
+    expect(params).toEqual(["CLI-000123"]);
     // Sin esquema cualificado: el rol de lectura fija su search_path.
     expect(sql).not.toMatch(NO_SCHEMA_PREFIX);
   });
@@ -52,12 +52,12 @@ describe("Contrato de la BD de la empresa (Fase 5) con el script de demostració
     const { sql, params } = await captureSql(
       getOrderStatusTool,
       { orderId: "123" },
-      { authenticatedUserId: "usr_101" },
+      { companyCustomerId: "CLI-000123", userRole: "USER" },
     );
     expect(sql).toMatch(/FROM\s+v_orders_status/i);
     expect(sql).toMatch(/order_id\s*,\s*status\s*,\s*total_amount\s*,\s*created_at/i);
     expect(sql).toMatch(/WHERE\s+order_id\s*=\s*\$1\s+AND\s+customer_id\s*=\s*\$2/i);
-    expect(params).toEqual(["123", "usr_101"]);
+    expect(params).toEqual(["123", "CLI-000123"]);
     expect(sql).not.toMatch(NO_SCHEMA_PREFIX);
   });
 
@@ -65,14 +65,14 @@ describe("Contrato de la BD de la empresa (Fase 5) con el script de demostració
     const { sql, params } = await captureSql(
       getRecentOrdersTool,
       { limit: 5 },
-      { authenticatedUserId: "usr_101" },
+      { companyCustomerId: "CLI-000123", userRole: "USER" },
     );
     expect(sql).toMatch(/FROM\s+v_recent_orders/i);
     expect(sql).toMatch(/order_id\s*,\s*status\s*,\s*total_amount\s*,\s*created_at/i);
     expect(sql).toMatch(/WHERE\s+customer_id\s*=\s*\$1/i);
     expect(sql).toMatch(/ORDER BY created_at DESC/i);
     expect(sql).toMatch(/LIMIT\s+\$2/i);
-    expect(params).toEqual(["usr_101", 5]);
+    expect(params).toEqual(["CLI-000123", 5]);
     expect(sql).not.toMatch(NO_SCHEMA_PREFIX);
   });
 

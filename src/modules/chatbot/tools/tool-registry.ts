@@ -3,7 +3,12 @@ import type { Pool } from 'pg';
 import type { CompanyRole } from '../../identity/domain/entities/company-user.js';
 
 export interface ToolContext {
-  authenticatedUserId: string;
+  /**
+   * Código de cliente en la BD de la empresa (p. ej. "CLI-000123"). Sale de la
+   * sesión del chat: es la ÚNICA clave con la que se filtran los datos personales.
+   * El id interno del bot (`company_users.id`) nunca se usa como código de cliente.
+   */
+  companyCustomerId: string;
   userRole: CompanyRole;
 }
 

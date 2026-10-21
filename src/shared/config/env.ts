@@ -3,6 +3,7 @@ import { parseAllowedOrigins } from "./allowed-origins.js";
 import { resolveChannelMode } from "./channel-mode.js";
 import { DEFAULT_FAQ_MIN_CONFIDENCE, parseFaqMinConfidence } from "./faq-min-confidence.js";
 import { resolveLlmProvider } from "./llm-provider.js";
+import { DEFAULT_COMPANY_CUSTOMER_ID_PATTERN } from "../../modules/identity/domain/customer-code.js";
 
 const nodeEnv = process.env.NODE_ENV ?? "development";
 const faqMinConfidence = parseFaqMinConfidence(process.env.FAQ_MIN_CONFIDENCE);
@@ -87,4 +88,8 @@ export const env = {
   companyDatabaseUrl: process.env.COMPANY_DATABASE_URL ?? "",
   companyQueryTimeoutMs: positiveInt(Number(process.env.COMPANY_QUERY_TIMEOUT_MS ?? "3000"), 3000),
   companyMaxRows: positiveInt(Number(process.env.COMPANY_MAX_ROWS ?? "50"), 50),
+  // Patrón que debe cumplir el código de cliente de la BD de la empresa para poder
+  // vincularlo a un usuario del bot. Vacío => patrón por defecto.
+  companyCustomerIdPattern:
+    (process.env.COMPANY_CUSTOMER_ID_PATTERN ?? "").trim() || DEFAULT_COMPANY_CUSTOMER_ID_PATTERN,
 };

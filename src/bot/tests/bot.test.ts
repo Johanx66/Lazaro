@@ -108,7 +108,7 @@ describe("ProcessIncomingMessageUseCase", () => {
   // Contacto verificado: la puerta de verificación se prueba en su propio test.
   const verifiedIdentity: ChatIdentityPort = {
     getActiveSessionName: async () => "Ana",
-    getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+    getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER", companyCustomerId: "CLI-000001" }),
     startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
     logout: async () => undefined,
   };

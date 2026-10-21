@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Pool } from 'pg';
 import type { LlmProvider } from '../domain/llm-provider.js';
 import { IntentClassifier } from '../application/intent-classifier.js';
-import { QueryDataUseCase } from '../application/query-data-use-case.js';
+import { CUSTOMER_NOT_LINKED_REPLY, QueryDataUseCase } from '../application/query-data-use-case.js';
 import { ToolRegistry, defineTool } from '../tools/tool-registry.js';
 import { getOrderStatusTool } from '../tools/order-status.tool.js';
 import { getRecentOrdersTool } from '../tools/recent-orders.tool.js';
@@ -43,7 +43,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     expect(result.intent).toBe('PEDIR_HUMANO');
   });
 
-  it('3. Aislamiento por usuario: la consulta usa el id de la sesión, no el del texto', async () => {
+  it('3. Aislamiento por cliente: la consulta usa el código de la sesión, no el del texto', async () => {
     generateCompletion.mockResolvedValueOnce(
       JSON.stringify({ toolName: 'get_order_status', parameters: { orderId: '999' } }),
     );
@@ -53,9 +53,10 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     const result = await useCase.execute('dame el pedido 999 del usuario usr_102', {
       companyUserId: 'usr_101',
       role: 'USER',
+      companyCustomerId: 'CLI-000001',
     });
 
-    expect(query).toHaveBeenCalledWith(expect.anything(), ['999', 'usr_101']);
+    expect(query).toHaveBeenCalledWith(expect.anything(), ['999', 'CLI-000001']);
     expect(result.reply).toBe('No encontré información relacionada con tu consulta.');
   });
 
@@ -68,6 +69,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     const result = await useCase.execute('revisa mi pedido', {
       companyUserId: 'usr_101',
       role: 'USER',
+      companyCustomerId: 'CLI-000001',
     });
 
     expect(result.reply).toBe('Los parámetros especificados para la consulta son inválidos.');
@@ -93,6 +95,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     const result = await useCase.execute('dame el reporte total', {
       companyUserId: 'usr_101',
       role: 'USER',
+      companyCustomerId: 'CLI-000001',
     });
 
     expect(result.reply).toBe('No tienes permisos para acceder a esta información.');
@@ -113,6 +116,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     const result = await useCase.execute('estado pedido 123', {
       companyUserId: 'usr_101',
       role: 'USER',
+      companyCustomerId: 'CLI-000001',
     });
 
     expect(result.reply).toBe('Tu pedido 123 está en camino.');
@@ -133,6 +137,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     const result = await useCase.execute('estado pedido 123', {
       companyUserId: 'usr_101',
       role: 'USER',
+      companyCustomerId: 'CLI-000001',
     });
 
     expect(result.handoffRequired).toBe(true);
@@ -151,8 +156,43 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     await useCase.execute('muéstrame mis pedidos recientes', {
       companyUserId: 'usr_101',
       role: 'USER',
+      companyCustomerId: 'CLI-000001',
     });
 
-    expect(query).toHaveBeenCalledWith(expect.anything(), ['usr_101', 5]);
+    expect(query).toHaveBeenCalledWith(expect.anything(), ['CLI-000001', 5]);
+  });
+
+  it('9. Cliente sin vincular: la consulta se deniega SIN llamar al modelo ni a la BD', async () => {
+    const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+    const result = await useCase.execute('¿cuál es mi saldo?', {
+      companyUserId: 'usr_101',
+      role: 'USER',
+      companyCustomerId: null,
+    });
+
+    expect(result.reply).toBe(CUSTOMER_NOT_LINKED_REPLY);
+    // Cero inferencias y cero consultas: no se llama al modelo ni a la BD de la empresa.
+    expect(generateCompletion).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('10. Cliente vinculado: el código de la sesión es el único filtro de los datos', async () => {
+    generateCompletion
+      .mockResolvedValueOnce(
+        JSON.stringify({ toolName: 'get_order_status', parameters: { orderId: '123' } }),
+      )
+      .mockResolvedValueOnce('Tu pedido 123 está en camino.');
+    query.mockResolvedValue({
+      rows: [{ order_id: '123', status: 'ENVIADO', total_amount: '10.00', created_at: new Date() }],
+    });
+
+    const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+    await useCase.execute('estado pedido 123', {
+      companyUserId: 'usr_101',
+      role: 'USER',
+      companyCustomerId: 'CLI-000001',
+    });
+
+    expect(query).toHaveBeenCalledWith(expect.anything(), ['123', 'CLI-000001']);
   });
 });

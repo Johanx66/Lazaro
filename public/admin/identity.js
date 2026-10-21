@@ -5,6 +5,7 @@
   var MAX_USERNAME = 60;
   var MAX_DISPLAY_NAME = 120;
   var MAX_PHONE = 40;
+  var MAX_COMPANY_CUSTOMER_ID = 64;
 
   var state = { editingId: null };
 
@@ -188,7 +189,9 @@
             (user.role === "ADMIN" ? "Administrador" : "Usuario") +
             " · " +
             (user.active ? "Activo" : "Inactivo") +
-            (user.registeredPhone ? " · Teléfono: " + user.registeredPhone : ""),
+            (user.registeredPhone ? " · Teléfono: " + user.registeredPhone : "") +
+            " · Cliente: " +
+            (user.companyCustomerId ? user.companyCustomerId : "sin vincular"),
         ),
       );
 
@@ -219,6 +222,8 @@
     $("uPassword").value = "";
     $("uPassword").placeholder = user ? "Nueva contraseña (opcional)" : "Contraseña (mínimo 12)";
     $("uPhone").value = user && user.registeredPhone ? user.registeredPhone : "";
+    $("uCompanyCustomerId").value =
+      user && user.companyCustomerId ? user.companyCustomerId : "";
     $("uRole").value = user ? user.role : "USER";
     $("userCancelBtn").hidden = !user;
     clearError($("userFormError"));
@@ -251,6 +256,9 @@
     if (values.displayName.length === 0) return "El nombre para mostrar es obligatorio";
     if (values.displayName.length > MAX_DISPLAY_NAME) return "El nombre es demasiado largo";
     if (values.registeredPhone.length > MAX_PHONE) return "El teléfono es demasiado largo";
+    if (values.companyCustomerId.length > MAX_COMPANY_CUSTOMER_ID) {
+      return "El código de cliente es demasiado largo";
+    }
     return null;
   }
 
@@ -264,6 +272,7 @@
       displayName: $("uDisplayName").value.trim(),
       password: $("uPassword").value,
       registeredPhone: $("uPhone").value.trim(),
+      companyCustomerId: $("uCompanyCustomerId").value.trim().toUpperCase(),
       role: $("uRole").value,
     };
     var problem = validateUser(values, editing);
@@ -281,12 +290,16 @@
           displayName: values.displayName,
           role: values.role,
           registeredPhone: values.registeredPhone.length > 0 ? values.registeredPhone : null,
+          companyCustomerId:
+            values.companyCustomerId.length > 0 ? values.companyCustomerId : null,
         });
       } else {
         var patch = {
           displayName: values.displayName,
           role: values.role,
           registeredPhone: values.registeredPhone.length > 0 ? values.registeredPhone : null,
+          companyCustomerId:
+            values.companyCustomerId.length > 0 ? values.companyCustomerId : null,
         };
         if (values.password.length > 0) patch.password = values.password;
         res = await api("PATCH", "/api/company-users/" + encodeURIComponent(state.editingId), patch);

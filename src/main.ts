@@ -205,6 +205,7 @@ const app = createApp(
       chatSessionAbsoluteHours: env.chatSessionAbsoluteHours,
       requirePhoneMatch: env.requirePhoneMatch,
       skipPhoneMatchForTelegram: env.telegramSkipPhoneMatch,
+      companyCustomerIdPattern: env.companyCustomerIdPattern,
       trustedOrigins: [...new Set([...env.allowedOrigins, new URL(env.publicBaseUrl).origin])],
       notifier: new AdapterChatNotifier({
         WEB: webAdapter,

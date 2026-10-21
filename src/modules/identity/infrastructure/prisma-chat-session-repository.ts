@@ -14,6 +14,7 @@ const ownerSelect = {
   role: true,
   active: true,
   lockedUntil: true,
+  companyCustomerId: true,
 } as const;
 
 type OwnerRow = {
@@ -22,6 +23,7 @@ type OwnerRow = {
   role: CompanyRole;
   active: boolean;
   lockedUntil: Date | null;
+  companyCustomerId: string | null;
 };
 
 function toDomain(row: {
@@ -122,5 +124,6 @@ function toOwner(row: OwnerRow): ChatSessionOwner {
     role: row.role as CompanyRole,
     active: row.active,
     lockedUntil: row.lockedUntil,
+    companyCustomerId: row.companyCustomerId,
   };
 }

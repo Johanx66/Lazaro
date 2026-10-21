@@ -18,14 +18,18 @@ export const getOrderStatusTool = defineTool({
   schema: OrderStatusSchema,
   allowedRoles: ['USER', 'ADMIN'],
   async executeQuery(params, context, companyDb): Promise<OrderStatusRow | null> {
-    // AISLAMIENTO: userId proviene ESTRICTAMENTE de context.authenticatedUserId
+    // AISLAMIENTO: el código de cliente proviene ESTRICTAMENTE de la sesión
+    // (context.companyCustomerId), nunca del texto del usuario ni del modelo.
     const query = `
       SELECT order_id, status, total_amount, created_at
       FROM v_orders_status
       WHERE order_id = $1 AND customer_id = $2
       LIMIT 1;
     `;
-    const result = await companyDb.query<OrderStatusRow>(query, [params.orderId, context.authenticatedUserId]);
+    const result = await companyDb.query<OrderStatusRow>(query, [
+      params.orderId,
+      context.companyCustomerId,
+    ]);
     return result.rows[0] ?? null;
   },
 });

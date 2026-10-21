@@ -9,7 +9,7 @@ import type {
 // Contacto verificado: aquí solo se comprueba la identidad externa por canal.
 const verified: ChatIdentityPort = {
   getActiveSessionName: async () => "Ana",
-  getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+  getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER", companyCustomerId: "CLI-000001" }),
   startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
   logout: async () => undefined,
 };

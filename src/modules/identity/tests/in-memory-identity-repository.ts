@@ -30,6 +30,7 @@ export class InMemoryCompanyUserRepository implements CompanyUserRepository {
     role?: CompanyUser["role"];
     active?: boolean;
     registeredPhone?: string | null;
+    companyCustomerId?: string | null;
     failedAttempts?: number;
     lockedUntil?: Date | null;
   }): CompanyUser {
@@ -41,6 +42,7 @@ export class InMemoryCompanyUserRepository implements CompanyUserRepository {
       role: input.role ?? "USER",
       active: input.active ?? true,
       registeredPhone: input.registeredPhone ?? null,
+      companyCustomerId: input.companyCustomerId ?? null,
       failedAttempts: input.failedAttempts ?? 0,
       lockedUntil: input.lockedUntil ?? null,
       createdAt: new Date(),
@@ -58,6 +60,12 @@ export class InMemoryCompanyUserRepository implements CompanyUserRepository {
     return this.store.get(id) ?? null;
   }
 
+  async findByCompanyCustomerId(companyCustomerId: string): Promise<CompanyUser | null> {
+    return (
+      [...this.store.values()].find((user) => user.companyCustomerId === companyCustomerId) ?? null
+    );
+  }
+
   async list(): Promise<CompanyUser[]> {
     return [...this.store.values()];
   }
@@ -73,6 +81,7 @@ export class InMemoryCompanyUserRepository implements CompanyUserRepository {
     if (input.role !== undefined) user.role = input.role;
     if (input.active !== undefined) user.active = input.active;
     if (input.registeredPhone !== undefined) user.registeredPhone = input.registeredPhone;
+    if (input.companyCustomerId !== undefined) user.companyCustomerId = input.companyCustomerId;
     if (input.passwordHash !== undefined) user.passwordHash = input.passwordHash;
     user.updatedAt = new Date();
     return user;
@@ -239,6 +248,7 @@ export class InMemoryChatSessionRepository implements ChatSessionRepository {
         role: owner.role,
         active: owner.active,
         lockedUntil: owner.lockedUntil,
+        companyCustomerId: owner.companyCustomerId,
       },
     };
   }

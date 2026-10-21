@@ -8,6 +8,8 @@ import type {
 export interface CompanyUserRepository {
   findByUsername(username: string): Promise<CompanyUser | null>;
   findById(id: string): Promise<CompanyUser | null>;
+  /** Busca por el código de cliente de la BD de la empresa (único). */
+  findByCompanyCustomerId(companyCustomerId: string): Promise<CompanyUser | null>;
   list(): Promise<CompanyUser[]>;
   create(input: CreateCompanyUserInput): Promise<CompanyUser>;
   update(id: string, input: UpdateCompanyUserInput): Promise<CompanyUser | null>;

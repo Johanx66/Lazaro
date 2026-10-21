@@ -15,6 +15,7 @@ function toDomain(row: {
   role: CompanyRole;
   active: boolean;
   registeredPhone: string | null;
+  companyCustomerId: string | null;
   failedAttempts: number;
   lockedUntil: Date | null;
   createdAt: Date;
@@ -36,6 +37,11 @@ export class PrismaCompanyUserRepository implements CompanyUserRepository {
     return row ? toDomain(row) : null;
   }
 
+  async findByCompanyCustomerId(companyCustomerId: string): Promise<CompanyUser | null> {
+    const row = await this.db.companyUser.findUnique({ where: { companyCustomerId } });
+    return row ? toDomain(row) : null;
+  }
+
   async list(): Promise<CompanyUser[]> {
     const rows = await this.db.companyUser.findMany({ orderBy: { createdAt: "asc" } });
     return rows.map(toDomain);
@@ -49,6 +55,7 @@ export class PrismaCompanyUserRepository implements CompanyUserRepository {
         displayName: input.displayName,
         role: input.role,
         registeredPhone: input.registeredPhone,
+        companyCustomerId: input.companyCustomerId ?? null,
       },
     });
     return toDomain(row);
@@ -60,6 +67,7 @@ export class PrismaCompanyUserRepository implements CompanyUserRepository {
     if (input.role !== undefined) data.role = input.role;
     if (input.active !== undefined) data.active = input.active;
     if (input.registeredPhone !== undefined) data.registeredPhone = input.registeredPhone;
+    if (input.companyCustomerId !== undefined) data.companyCustomerId = input.companyCustomerId;
     if (input.passwordHash !== undefined) data.passwordHash = input.passwordHash;
 
     const row = await this.db.companyUser.update({ where: { id }, data });

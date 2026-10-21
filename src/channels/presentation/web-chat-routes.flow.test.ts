@@ -63,7 +63,7 @@ async function setup() {
     // no la puerta de verificación (que tiene su propio test).
     identity: {
       getActiveSessionName: async () => "Ana",
-      getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+      getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER", companyCustomerId: "CLI-000001" }),
       startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
       logout: async () => undefined,
     },

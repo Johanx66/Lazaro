@@ -51,7 +51,7 @@ function makeIdentity(overrides: Partial<ChatIdentityPort> = {}): ChatIdentityPo
     // Por defecto se considera VERIFICADO (sesión vigente y cliente autorizado),
     // para poder probar el flujo posterior a la verificación. Los casos que
     // necesitan un contacto no verificado lo sobrescriben con `null`.
-    getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+    getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER", companyCustomerId: "CLI-000001" }),
     startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
     logout: async () => undefined,
     ...overrides,

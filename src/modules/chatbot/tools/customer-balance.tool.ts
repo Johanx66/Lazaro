@@ -20,7 +20,7 @@ export const getCustomerBalanceTool = defineTool({
       FROM v_customer_balance
       WHERE customer_id = $1;
     `;
-    const result = await companyDb.query<CustomerBalanceRow>(query, [context.authenticatedUserId]);
+    const result = await companyDb.query<CustomerBalanceRow>(query, [context.companyCustomerId]);
     return result.rows[0] ?? null;
   },
 });

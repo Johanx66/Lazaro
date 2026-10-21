@@ -210,10 +210,14 @@ model CompanyUser {
   active          Boolean     @default(true)
   // Teléfono autorizado (con REQUIRE_PHONE_MATCH). Opcional.
   registeredPhone String?
-  failedAttempts  Int         @default(0)
-  lockedUntil     DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  // Código de cliente en la BD de la empresa (p. ej. "CLI-000123"). Es la clave con
+  // la que se filtran las consultas de datos del chat. Lo asigna un ADMIN desde el
+  // panel; es único y NUNCA se deriva del id interno del bot.
+  companyCustomerId String?     @unique
+  failedAttempts    Int         @default(0)
+  lockedUntil       DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
   chatSessions ChatSession[]
 

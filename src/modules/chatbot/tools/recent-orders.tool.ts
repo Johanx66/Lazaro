@@ -26,7 +26,7 @@ export const getRecentOrdersTool = defineTool({
       LIMIT $2;
     `;
     const result = await companyDb.query<RecentOrderRow>(query, [
-      context.authenticatedUserId,
+      context.companyCustomerId,
       params.limit,
     ]);
     return result.rows;
