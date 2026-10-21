@@ -5,11 +5,24 @@ import type {
   CreateChatSessionInput,
 } from "../domain/entities/chat-session.js";
 import type { CompanyRole } from "../domain/entities/company-user.js";
+import type { ChatSessionOwner } from "../domain/entities/chat-session.js";
 import type { ChatSessionRepository } from "../domain/repositories/chat-session-repository.js";
 
-const ownerSelect = { id: true, displayName: true, role: true, active: true } as const;
+const ownerSelect = {
+  id: true,
+  displayName: true,
+  role: true,
+  active: true,
+  lockedUntil: true,
+} as const;
 
-type OwnerRow = { id: string; displayName: string; role: CompanyRole; active: boolean };
+type OwnerRow = {
+  id: string;
+  displayName: string;
+  role: CompanyRole;
+  active: boolean;
+  lockedUntil: Date | null;
+};
 
 function toDomain(row: {
   id: string;
@@ -91,8 +104,23 @@ export class PrismaChatSessionRepository implements ChatSessionRepository {
   async revoke(id: string, revokedAt: Date): Promise<void> {
     await this.db.chatSession.updateMany({ where: { id, revokedAt: null }, data: { revokedAt } });
   }
+
+  /** Una sola sentencia: todas las sesiones abiertas del cliente quedan revocadas. */
+  async revokeAllByCompanyUser(companyUserId: string, revokedAt: Date): Promise<number> {
+    const result = await this.db.chatSession.updateMany({
+      where: { companyUserId, revokedAt: null },
+      data: { revokedAt },
+    });
+    return result.count;
+  }
 }
 
-function toOwner(row: OwnerRow): { id: string; displayName: string; role: CompanyRole; active: boolean } {
-  return { id: row.id, displayName: row.displayName, role: row.role as CompanyRole, active: row.active };
+function toOwner(row: OwnerRow): ChatSessionOwner {
+  return {
+    id: row.id,
+    displayName: row.displayName,
+    role: row.role as CompanyRole,
+    active: row.active,
+    lockedUntil: row.lockedUntil,
+  };
 }

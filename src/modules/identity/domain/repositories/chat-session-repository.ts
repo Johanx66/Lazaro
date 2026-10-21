@@ -10,4 +10,10 @@ export interface ChatSessionRepository {
   /** Renueva lastActivityAt y el vencimiento por inactividad. */
   touch(id: string, lastActivityAt: Date, expiresAt: Date): Promise<void>;
   revoke(id: string, revokedAt: Date): Promise<void>;
+  /**
+   * Revoca de una sola vez todas las sesiones abiertas de un cliente.
+   * Se usa cuando cambia su teléfono registrado: el contacto anterior no debe
+   * poder seguir usando la sesión. Devuelve cuántas sesiones se revocaron.
+   */
+  revokeAllByCompanyUser(companyUserId: string, revokedAt: Date): Promise<number>;
 }

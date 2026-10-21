@@ -59,6 +59,14 @@ async function setup() {
     users: { findOrCreateUser: async () => ({ id: "u1" }) } as UserAccountPort,
     conversations: makePorts(),
     knowledge: { findAnswer: async () => null },
+    // Contacto verificado: aquí se prueba el flujo de transferencia a asesor,
+    // no la puerta de verificación (que tiene su propio test).
+    identity: {
+      getActiveSessionName: async () => "Ana",
+      getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+      startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
+      logout: async () => undefined,
+    },
   });
   const handleInbound = new HandleInboundMessageUseCase({ processor, adapter, notifier });
   app.use("/dev/chat", webChatRoutes({ adapter, handleInbound }));

@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import express from "express";
 import type { Server } from "http";
 import { ProcessIncomingMessageUseCase } from "../application/process-incoming-message.js";
-import type { InboundConversationPorts, UserAccountPort } from "../application/process-incoming-message.js";
+import type { ChatIdentityPort, InboundConversationPorts, UserAccountPort } from "../application/process-incoming-message.js";
 import { CompositeKnowledgeRepository, StaticKnowledgeBase, scoreMatch, selectBestMatch } from "../domain/knowledge.js";
 import type { KnowledgeArticle } from "../domain/knowledge.js";
 import { whatsappWebhookRouter } from "../presentation/whatsapp-webhook.js";
@@ -105,6 +105,14 @@ describe("ProcessIncomingMessageUseCase", () => {
     findOrCreateUser: async () => ({ id: "u1" }),
   };
 
+  // Contacto verificado: la puerta de verificación se prueba en su propio test.
+  const verifiedIdentity: ChatIdentityPort = {
+    getActiveSessionName: async () => "Ana",
+    getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+    startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
+    logout: async () => undefined,
+  };
+
   it("responde por el bot cuando la KB encuentra la respuesta", async () => {
     let sent = false;
     let replied = false;
@@ -121,6 +129,7 @@ describe("ProcessIncomingMessageUseCase", () => {
         },
       }),
       knowledge: { findAnswer: async () => "respuesta de ejemplo" },
+      identity: verifiedIdentity,
     });
 
     const result = await useCase.execute({ channel: "WHATSAPP", contactId: "573001234567", name: "Ana", text: "hola" });
@@ -140,6 +149,7 @@ describe("ProcessIncomingMessageUseCase", () => {
         },
       }),
       knowledge: { findAnswer: async () => null },
+      identity: verifiedIdentity,
     });
 
     const result = await useCase.execute({ channel: "WHATSAPP", contactId: "573001234567", name: "Ana", text: "un texto sin respuesta" });

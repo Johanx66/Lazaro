@@ -48,8 +48,11 @@ function makeConversations(): InboundConversationPorts {
 function makeIdentity(overrides: Partial<ChatIdentityPort> = {}): ChatIdentityPort {
   return {
     getActiveSessionName: async () => null,
-    getActivePrincipal: async () => null,
-    startLogin: async () => "https://app.example/login?t=token",
+    // Por defecto se considera VERIFICADO (sesión vigente y cliente autorizado),
+    // para poder probar el flujo posterior a la verificación. Los casos que
+    // necesitan un contacto no verificado lo sobrescriben con `null`.
+    getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+    startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
     logout: async () => undefined,
     ...overrides,
   };
@@ -68,9 +71,12 @@ function makeUseCase(identity?: ChatIdentityPort) {
 const inbound = (text: string) => ({ channel: "WEB" as const, contactId: "570000000001", name: "Ana", text });
 
 describe("ProcessIncomingMessageUseCase — identidad del chat", () => {
-  it("sin sesión, 'iniciar sesión' responde con el enlace de acceso", async () => {
-    const result = await makeUseCase(makeIdentity()).execute(inbound("quiero iniciar sesión"));
-    expect(result.handledByBot).toBe(true);
+  it("sin sesión, 'iniciar sesión' responde con el mensaje de verificación y el enlace", async () => {
+    const result = await makeUseCase(
+      makeIdentity({ getActivePrincipal: async () => null }),
+    ).execute(inbound("quiero iniciar sesión"));
+    expect(result.handledByBot).toBe(false);
+    expect(result.reply).toContain("verificar tu identidad");
     expect(result.reply).toContain("https://app.example/login?t=token");
   });
 
@@ -82,7 +88,7 @@ describe("ProcessIncomingMessageUseCase — identidad del chat", () => {
     expect(result.reply).toContain("Ya tienes la sesión");
   });
 
-  it("'salir' cierra la sesión y responde sin consultar la base de conocimiento", async () => {
+  it("'salir' con sesión cierra la sesión y responde sin consultar la base de conocimiento", async () => {
     let loggedOut = false;
     const identity = makeIdentity({
       logout: async () => {
@@ -95,14 +101,24 @@ describe("ProcessIncomingMessageUseCase — identidad del chat", () => {
     expect(result.reply).toContain("cerrado tu sesión");
   });
 
-  it("un mensaje normal sigue el flujo habitual (no lo captura identidad)", async () => {
+  it("'salir' sin sesión responde un mensaje estático sin enlace", async () => {
+    const result = await makeUseCase(
+      makeIdentity({ getActivePrincipal: async () => null }),
+    ).execute(inbound("salir"));
+    expect(result.handledByBot).toBe(false);
+    expect(result.reply).toContain("No tienes una sesión activa");
+    expect(result.reply).not.toContain("login?t=");
+  });
+
+  it("un mensaje normal de un contacto verificado sigue el flujo habitual", async () => {
     const result = await makeUseCase(makeIdentity()).execute(inbound("hola, buenos días"));
     expect(result.reply).not.toContain("login?t=");
   });
 
-  it("sin puerto de identidad, 'iniciar sesión' cae en el flujo normal", async () => {
+  it("sin puerto de identidad, un mensaje se bloquea (fail closed)", async () => {
     const result = await makeUseCase(undefined).execute(inbound("iniciar sesión"));
     expect(result.handledByBot).toBe(false);
+    expect(result.reply).toContain("verificar tu identidad");
     expect(result.reply).not.toContain("login?t=");
   });
 });

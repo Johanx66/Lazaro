@@ -1,4 +1,5 @@
 import type { WhatsAppSender } from "../domain/whatsapp.js";
+import { redactLoginLinks } from "../../shared/application/redact-secrets.js";
 
 export interface GraphWhatsAppConfig {
   accessToken: string;
@@ -65,7 +66,13 @@ export class GraphWhatsAppSender implements WhatsAppSender {
 export class LogWhatsAppSender implements WhatsAppSender {
   async sendText(to: string, message: string): Promise<void> {
     console.log(
-      JSON.stringify({ level: "info", mock: "whatsapp", to, message }),
+      // El token de los enlaces de login es una credencial: no se registra.
+      JSON.stringify({
+        level: "info",
+        mock: "whatsapp",
+        to,
+        message: redactLoginLinks(message),
+      }),
     );
   }
 

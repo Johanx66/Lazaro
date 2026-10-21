@@ -42,10 +42,12 @@ describe("enlaces de login", () => {
   });
 
   it("genera una URL /login?t=<token> y guarda solo el hash, nunca el token", async () => {
-    const { url } = await generate.execute({ channel: "WEB", contactId: "570000000001" });
-    expect(url.startsWith("https://example.test/login?t=")).toBe(true);
+    const generated = await generate.execute({ channel: "WEB", contactId: "570000000001" });
+    expect(generated.kind).toBe("created");
+    if (generated.kind !== "created") throw new Error("se esperaba un enlace nuevo");
+    expect(generated.url.startsWith("https://example.test/login?t=")).toBe(true);
 
-    const token = new URL(url).searchParams.get("t");
+    const token = new URL(generated.url).searchParams.get("t");
     expect(token).toBeTruthy();
 
     const stored = await links.findByTokenHash(hashToken(token ?? ""));
@@ -56,8 +58,9 @@ describe("enlaces de login", () => {
   });
 
   it("valida un enlace vigente y devuelve el contacto enmascarado", async () => {
-    const { url } = await generate.execute({ channel: "WEB", contactId: "570000000001" });
-    const token = new URL(url).searchParams.get("t") ?? "";
+    const generated = await generate.execute({ channel: "WEB", contactId: "570000000001" });
+    if (generated.kind !== "created") throw new Error("se esperaba un enlace nuevo");
+    const token = new URL(generated.url).searchParams.get("t") ?? "";
     const result = await validate.execute(token);
     expect(result).toEqual({
       channel: "WEB",
@@ -67,28 +70,74 @@ describe("enlaces de login", () => {
   });
 
   it("rechaza un enlace vencido", async () => {
-    const { url } = await generate.execute({ channel: "WEB", contactId: "570000000001" });
-    const token = new URL(url).searchParams.get("t") ?? "";
+    const generated = await generate.execute({ channel: "WEB", contactId: "570000000001" });
+    if (generated.kind !== "created") throw new Error("se esperaba un enlace nuevo");
+    const token = new URL(generated.url).searchParams.get("t") ?? "";
     clock.advance(11 * MINUTE);
     expect(await validate.execute(token)).toBeNull();
   });
 
   it("rechaza un enlace ya usado", async () => {
-    const { url } = await generate.execute({ channel: "WEB", contactId: "570000000001" });
-    const token = new URL(url).searchParams.get("t") ?? "";
+    const generated = await generate.execute({ channel: "WEB", contactId: "570000000001" });
+    if (generated.kind !== "created") throw new Error("se esperaba un enlace nuevo");
+    const token = new URL(generated.url).searchParams.get("t") ?? "";
     const link = await links.findByTokenHash(hashToken(token));
     await links.markUsed(link!.id, clock.now());
     expect(await validate.execute(token)).toBeNull();
   });
 
-  it("al pedir un enlace nuevo, invalida los anteriores del mismo contacto", async () => {
+  it("reutiliza el enlace vigente: no genera uno nuevo ni invalida el anterior", async () => {
     const first = await generate.execute({ channel: "WEB", contactId: "570000000001" });
+    if (first.kind !== "created") throw new Error("se esperaba un enlace nuevo");
     const firstToken = new URL(first.url).searchParams.get("t") ?? "";
-    const second = await generate.execute({ channel: "WEB", contactId: "570000000001" });
-    const secondToken = new URL(second.url).searchParams.get("t") ?? "";
 
+    const second = await generate.execute({ channel: "WEB", contactId: "570000000001" });
+
+    // Se reutiliza: no hay URL nueva y el enlace anterior sigue siendo válido.
+    expect(second.kind).toBe("reused");
+    expect(await validate.execute(firstToken)).not.toBeNull();
+    // No se creó un enlace nuevo: sigue habiendo uno solo vigente para el contacto.
+    expect(await links.findActiveForContact("WEB", "570000000001", clock.now())).not.toBeNull();
+    // La reutilización no genera una auditoría de creación.
+    expect(audit.entries).toHaveLength(1);
+  });
+
+  it("genera un enlace nuevo cuando el anterior expiró", async () => {
+    const first = await generate.execute({ channel: "WEB", contactId: "570000000001" });
+    if (first.kind !== "created") throw new Error("se esperaba un enlace nuevo");
+    const firstToken = new URL(first.url).searchParams.get("t") ?? "";
+
+    clock.advance(11 * MINUTE);
+    const second = await generate.execute({ channel: "WEB", contactId: "570000000001" });
+
+    expect(second.kind).toBe("created");
+    if (second.kind !== "created") throw new Error("se esperaba un enlace nuevo");
+    const secondToken = new URL(second.url).searchParams.get("t") ?? "";
+    expect(secondToken).not.toBe(firstToken);
+    // El enlace vencido deja de servir.
     expect(await validate.execute(firstToken)).toBeNull();
     expect(await validate.execute(secondToken)).not.toBeNull();
+  });
+
+  it("genera un enlace nuevo cuando el anterior fue consumido", async () => {
+    const first = await generate.execute({ channel: "WEB", contactId: "570000000001" });
+    if (first.kind !== "created") throw new Error("se esperaba un enlace nuevo");
+    const firstToken = new URL(first.url).searchParams.get("t") ?? "";
+    const link = await links.findByTokenHash(hashToken(firstToken));
+    await links.markUsed(link!.id, clock.now());
+
+    const second = await generate.execute({ channel: "WEB", contactId: "570000000001" });
+
+    expect(second.kind).toBe("created");
+    if (second.kind !== "created") throw new Error("se esperaba un enlace nuevo");
+    const secondToken = new URL(second.url).searchParams.get("t") ?? "";
+    expect(secondToken).not.toBe(firstToken);
+  });
+
+  it("no reutiliza el enlace de otro canal", async () => {
+    await generate.execute({ channel: "WEB", contactId: "570000000001" });
+    const telegram = await generate.execute({ channel: "TELEGRAM", contactId: "570000000001" });
+    expect(telegram.kind).toBe("created");
   });
 
   it("rechaza tokens mal formados sin tocar el repositorio", async () => {

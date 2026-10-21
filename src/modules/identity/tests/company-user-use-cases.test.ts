@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { PasswordHasher } from "../../../shared/domain/password-hasher.js";
+import { ChatSessionService } from "../application/chat-session-service.js";
 import { CreateCompanyUserUseCase, UsernameTakenError } from "../application/use-cases/create-company-user.js";
 import { ListCompanyUsersUseCase } from "../application/use-cases/list-company-users.js";
 import { UpdateCompanyUserUseCase } from "../application/use-cases/update-company-user.js";
 import {
   InMemoryAuditWriter,
+  InMemoryChatSessionRepository,
   InMemoryCompanyUserRepository,
 } from "./in-memory-identity-repository.js";
 
@@ -13,13 +15,22 @@ const hasher: PasswordHasher = {
   verify: async (hash, password) => hash === `hash:${password}`,
 };
 
+const MINUTE = 60_000;
+
 describe("administración de usuarios de empresa", () => {
   let repository: InMemoryCompanyUserRepository;
   let audit: InMemoryAuditWriter;
+  let sessions: ChatSessionService;
 
   beforeEach(() => {
     repository = new InMemoryCompanyUserRepository();
     audit = new InMemoryAuditWriter();
+    sessions = new ChatSessionService({
+      repository: new InMemoryChatSessionRepository(repository),
+      clock: { now: () => new Date() },
+      idleMs: 20 * MINUTE,
+      absoluteMs: 8 * 60 * MINUTE,
+    });
   });
 
   it("crea un usuario con la contraseña hasheada y lo audita", async () => {
@@ -64,7 +75,7 @@ describe("administración de usuarios de empresa", () => {
 
   it("actualiza el rol, el estado y la contraseña", async () => {
     const user = repository.addUser({ username: "ana", passwordHash: "hash:vieja", displayName: "Ana" });
-    const update = new UpdateCompanyUserUseCase({ repository, hasher, audit });
+    const update = new UpdateCompanyUserUseCase({ repository, hasher, audit, sessions });
 
     const updated = await update.execute({
       id: user.id,
@@ -78,6 +89,91 @@ describe("administración de usuarios de empresa", () => {
     expect(updated.active).toBe(false);
     expect(user.passwordHash).toBe("hash:nueva-contrasena-123");
     expect(audit.entries[0]?.action).toBe("COMPANY_USER_DEACTIVATED");
+  });
+
+  it("cambiar el teléfono registrado revoca las sesiones abiertas del cliente", async () => {
+    const user = repository.addUser({
+      username: "ana",
+      passwordHash: "hash:vieja",
+      registeredPhone: "570000000001",
+    });
+    await sessions.create(user.id, "WEB", "570000000001");
+    expect(await sessions.getActive("WEB", "570000000001")).not.toBeNull();
+
+    const update = new UpdateCompanyUserUseCase({ repository, hasher, audit, sessions });
+    await update.execute({
+      id: user.id,
+      registeredPhone: "570000000002",
+      adminId: "admin-1",
+    });
+
+    expect(user.registeredPhone).toBe("570000000002");
+    expect(await sessions.getActive("WEB", "570000000001")).toBeNull();
+    expect(audit.entries.map((e) => e.action)).toEqual([
+      "CHAT_SESSIONS_REVOKED",
+      "COMPANY_USER_UPDATED",
+    ]);
+    expect(audit.entries[0]?.metadata).toMatchObject({
+      reason: "registeredPhone_changed",
+      sessionsRevoked: 1,
+    });
+  });
+
+  it("cambiar otros datos NO revoca las sesiones abiertas", async () => {
+    const user = repository.addUser({
+      username: "ana",
+      passwordHash: "hash:vieja",
+      registeredPhone: "570000000001",
+    });
+    await sessions.create(user.id, "WEB", "570000000001");
+
+    const update = new UpdateCompanyUserUseCase({ repository, hasher, audit, sessions });
+    await update.execute({ id: user.id, displayName: "Ana María", adminId: "admin-1" });
+
+    expect(await sessions.getActive("WEB", "570000000001")).not.toBeNull();
+    expect(audit.entries.map((e) => e.action)).toEqual(["COMPANY_USER_UPDATED"]);
+  });
+
+  it("reescribir el mismo teléfono NO revoca las sesiones abiertas", async () => {
+    const user = repository.addUser({
+      username: "ana",
+      passwordHash: "hash:vieja",
+      registeredPhone: "570000000001",
+    });
+    await sessions.create(user.id, "WEB", "570000000001");
+
+    const update = new UpdateCompanyUserUseCase({ repository, hasher, audit, sessions });
+    await update.execute({ id: user.id, registeredPhone: "570000000001", adminId: "admin-1" });
+
+    expect(await sessions.getActive("WEB", "570000000001")).not.toBeNull();
+    expect(audit.entries.map((e) => e.action)).toEqual(["COMPANY_USER_UPDATED"]);
+  });
+
+  it("eliminar el teléfono registrado también revoca las sesiones abiertas", async () => {
+    const user = repository.addUser({
+      username: "ana",
+      passwordHash: "hash:vieja",
+      registeredPhone: "570000000001",
+    });
+    await sessions.create(user.id, "WEB", "570000000001");
+
+    const update = new UpdateCompanyUserUseCase({ repository, hasher, audit, sessions });
+    await update.execute({ id: user.id, registeredPhone: null, adminId: "admin-1" });
+
+    expect(await sessions.getActive("WEB", "570000000001")).toBeNull();
+  });
+
+  it("no revoca nada si el cliente no tiene sesiones abiertas", async () => {
+    const user = repository.addUser({
+      username: "ana",
+      passwordHash: "hash:vieja",
+      registeredPhone: "570000000001",
+    });
+
+    const update = new UpdateCompanyUserUseCase({ repository, hasher, audit, sessions });
+    await update.execute({ id: user.id, registeredPhone: "570000000002", adminId: "admin-1" });
+
+    expect(audit.entries[0]?.metadata).toMatchObject({ sessionsRevoked: 0 });
   });
 
   it("lista los usuarios sin exponer el hash de la contraseña", async () => {

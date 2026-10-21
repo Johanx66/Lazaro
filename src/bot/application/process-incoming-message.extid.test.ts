@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { ProcessIncomingMessageUseCase } from "./process-incoming-message.js";
-import type { InboundConversationPorts, UserAccountPort } from "./process-incoming-message.js";
+import type {
+  ChatIdentityPort,
+  InboundConversationPorts,
+  UserAccountPort,
+} from "./process-incoming-message.js";
+
+// Contacto verificado: aquí solo se comprueba la identidad externa por canal.
+const verified: ChatIdentityPort = {
+  getActiveSessionName: async () => "Ana",
+  getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+  startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
+  logout: async () => undefined,
+};
 
 function makePorts(): InboundConversationPorts {
   return {
@@ -46,6 +58,7 @@ describe("externalCustomerId según canal", () => {
       } as UserAccountPort,
       conversations: makePorts(),
       knowledge: { findAnswer: async () => "ok" },
+      identity: verified,
     });
     await useCase.execute({ channel: "WEB", contactId: "570000000001", name: "Ana", text: "hola" });
     expect(ext).toBe("web-570000000001");
@@ -62,6 +75,7 @@ describe("externalCustomerId según canal", () => {
       } as UserAccountPort,
       conversations: makePorts(),
       knowledge: { findAnswer: async () => "ok" },
+      identity: verified,
     });
     await useCase.execute({ channel: "WHATSAPP", contactId: "573001234567", name: "Ana", text: "hola" });
     expect(ext).toBe("whatsapp-573001234567");
@@ -78,6 +92,7 @@ describe("externalCustomerId según canal", () => {
       } as UserAccountPort,
       conversations: makePorts(),
       knowledge: { findAnswer: async () => "ok" },
+      identity: verified,
     });
     await useCase.execute({ channel: "TELEGRAM", contactId: "570123456789", name: "Ana", text: "hola" });
     expect(ext).toBe("telegram-570123456789");

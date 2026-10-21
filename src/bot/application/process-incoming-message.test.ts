@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { ProcessIncomingMessageUseCase } from "./process-incoming-message.js";
-import type { InboundConversationPorts, UserAccountPort } from "./process-incoming-message.js";
+import type {
+  ChatIdentityPort,
+  InboundConversationPorts,
+  UserAccountPort,
+} from "./process-incoming-message.js";
+
+// El uso del canal se comprueba con un contacto ya verificado; la puerta de
+// verificación se prueba aparte en process-incoming-message.verification.test.ts.
+function verifiedIdentity(): ChatIdentityPort {
+  return {
+    getActiveSessionName: async () => "Ana",
+    getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+    startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
+    logout: async () => undefined,
+  };
+}
 
 function makePorts(): InboundConversationPorts {
   return {
@@ -57,6 +72,7 @@ describe("ProcessIncomingMessageUseCase canal", () => {
         },
       },
       knowledge: { findAnswer: async () => "ok" },
+      identity: verifiedIdentity(),
     });
     await useCase.execute({ channel: "WEB", contactId: "570000000001", name: "Ana", text: "hola" });
     expect(channelUsed).toBe("WEB");
@@ -84,6 +100,7 @@ describe("ProcessIncomingMessageUseCase canal", () => {
         },
       },
       knowledge: { findAnswer: async () => null },
+      identity: verifiedIdentity(),
     });
     await useCase.execute({ channel: "WHATSAPP", contactId: "573001234567", name: "Ana", text: "x" });
     expect(channelUsed).toBe("WHATSAPP");

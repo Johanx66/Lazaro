@@ -18,18 +18,37 @@ export interface GenerateLoginLinkCommand {
   ip?: string | null;
 }
 
-export interface GeneratedLoginLink {
-  /** URL absoluta a entregar en el chat. No se registra en logs ni auditoría. */
-  url: string;
-  expiresAt: Date;
-}
+/**
+ * Resultado de pedir un enlace de acceso:
+ * - `created`: se generó un enlace nuevo y `url` es la URL a entregar.
+ * - `reused`: ya existía un enlace vigente del mismo contacto, así que se
+ *   REUTILIZA: no se genera un token nuevo y el enlace que el usuario ya tiene
+ *   sigue siendo válido hasta su vencimiento.
+ */
+export type GeneratedLoginLink =
+  | { kind: "created"; url: string; expiresAt: Date }
+  | { kind: "reused"; expiresAt: Date };
 
 export class GenerateLoginLinkUseCase {
   constructor(private readonly deps: GenerateLoginLinkDeps) {}
 
   async execute(command: GenerateLoginLinkCommand): Promise<GeneratedLoginLink> {
     const now = this.deps.clock.now();
-    // Un enlace nuevo invalida los anteriores del mismo contacto: solo el último sirve.
+
+    // Si el contacto ya tiene un enlace vigente se reutiliza: no se crea un
+    // token nuevo y, sobre todo, no se invalida el enlace que el usuario
+    // pueda tener abierto. Solo se genera otro cuando el anterior expiró,
+    // fue consumido o nunca existió.
+    const active = await this.deps.repository.findActiveForContact(
+      command.channel,
+      command.contactId,
+      now,
+    );
+    if (active) {
+      return { kind: "reused", expiresAt: active.expiresAt };
+    }
+
+    // No hay enlace utilizable: se invalidan los que quedaran sin usar y se crea uno nuevo.
     await this.deps.repository.invalidateActiveForContact(command.channel, command.contactId, now);
 
     const token = generateOpaqueToken();
@@ -49,6 +68,6 @@ export class GenerateLoginLinkUseCase {
       metadata: { channel: command.channel, contactId: command.contactId },
     });
 
-    return { url: `${this.deps.publicBaseUrl}/login?t=${token}`, expiresAt };
+    return { kind: "created", url: `${this.deps.publicBaseUrl}/login?t=${token}`, expiresAt };
   }
 }

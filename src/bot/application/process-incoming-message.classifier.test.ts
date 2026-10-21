@@ -60,8 +60,9 @@ function makeConversations(record: { transferReason?: string } = {}): InboundCon
 function makeIdentity(overrides: Partial<ChatIdentityPort> = {}): ChatIdentityPort {
   return {
     getActiveSessionName: async () => null,
-    getActivePrincipal: async () => null,
-    startLogin: async () => "https://app.example/login?t=token",
+    // Por defecto VERIFICADO; los casos sin sesión lo sobrescriben con null.
+    getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+    startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
     logout: async () => undefined,
     ...overrides,
   };
@@ -81,25 +82,27 @@ function makeUseCase(options: {
     transferAfterMisses: 3,
     classifier: options.classifier,
     dataQuery: options.dataQuery,
-    ...(options.identity ? { identity: options.identity } : {}),
+    identity: options.identity ?? makeIdentity(),
   });
 }
 
 describe("ProcessIncomingMessageUseCase — enrutado por clasificador (Fase 5)", () => {
-  it("CONSULTA_DATOS sin sesión responde con enlace de login y no consulta datos", async () => {
+  it("CONSULTA_DATOS sin sesión responde con enlace de verificación y no consulta datos", async () => {
     const execute = vi.fn().mockResolvedValue({ reply: "no debería usarse" });
+    const classify = vi.fn();
     const useCase = makeUseCase({
       conversations: makeConversations(),
-      classifier: { classify: async () => ({ intent: "CONSULTA_DATOS" }) },
+      classifier: { classify },
       dataQuery: { execute },
-      identity: makeIdentity(),
+      identity: makeIdentity({ getActivePrincipal: async () => null }),
     });
 
     const result = await useCase.execute(inbound("cuál es mi saldo"));
 
-    expect(result.handledByBot).toBe(true);
+    expect(result.handledByBot).toBe(false);
     expect(result.reply).toContain("https://app.example/login?t=token");
     expect(execute).not.toHaveBeenCalled();
+    expect(classify).not.toHaveBeenCalled();
   });
 
   it("CONSULTA_DATOS con sesión consulta datos usando la identidad de la sesión", async () => {

@@ -105,8 +105,12 @@ async function startHarness(): Promise<Harness> {
     base: `http://127.0.0.1:${port}`,
     users,
     generateLink: async () => {
-      const { url } = await generate.execute({ channel: "WEB", contactId: CONTACT });
-      return new URL(url).searchParams.get("t") ?? "";
+      // Se fuerza un enlace nuevo: el test necesita el token en claro para
+      // llamar a la API, y un enlace reutilizado no lo expone.
+      await links.invalidateActiveForContact("WEB", CONTACT, clock.now());
+      const generated = await generate.execute({ channel: "WEB", contactId: CONTACT });
+      if (generated.kind !== "created") throw new Error("no se generó un enlace nuevo");
+      return new URL(generated.url).searchParams.get("t") ?? "";
     },
   };
 }

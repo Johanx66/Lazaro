@@ -1,4 +1,5 @@
 import type { TelegramSender } from "../domain/telegram.js";
+import { redactLoginLinks } from "../../shared/application/redact-secrets.js";
 
 const TELEGRAM_API_URL = "https://api.telegram.org";
 
@@ -22,7 +23,13 @@ export class HttpTelegramSender implements TelegramSender {
 export class LogTelegramSender implements TelegramSender {
   async sendText(chatId: string, message: string): Promise<void> {
     console.log(
-      JSON.stringify({ level: "info", mock: "telegram", chatId, message }),
+      // El token de los enlaces de login es una credencial: no se registra.
+      JSON.stringify({
+        level: "info",
+        mock: "telegram",
+        chatId,
+        message: redactLoginLinks(message),
+      }),
     );
   }
 }

@@ -13,6 +13,13 @@ export class PrismaLoginLinkRepository implements LoginLinkRepository {
     return this.db.loginLink.findUnique({ where: { tokenHash } });
   }
 
+  async findActiveForContact(channel: string, contactId: string, now: Date): Promise<LoginLink | null> {
+    return this.db.loginLink.findFirst({
+      where: { channel, contactId, usedAt: null, expiresAt: { gt: now } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
   async markUsed(id: string, usedAt: Date): Promise<void> {
     await this.db.loginLink.updateMany({ where: { id, usedAt: null }, data: { usedAt } });
   }

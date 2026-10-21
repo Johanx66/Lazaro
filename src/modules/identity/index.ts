@@ -1,6 +1,11 @@
 import type { Express } from "express";
 import type { PrismaClient } from "../../generated/prisma/client.js";
-import type { ChatIdentityPort, ChatChannel, ChatSessionPrincipal } from "../../bot/application/process-incoming-message.js";
+import type {
+  ChatIdentityPort,
+  ChatChannel,
+  ChatSessionPrincipal,
+  LoginLinkDelivery,
+} from "../../bot/application/process-incoming-message.js";
 import { rateLimit } from "../../shared/http/rate-limit.js";
 import { Argon2PasswordHasher } from "../../shared/infrastructure/argon2-password-hasher.js";
 import { requireRole } from "../auth/presentation/api-guard.js";
@@ -98,7 +103,12 @@ export function wireIdentity(
   const logoutChat = new LogoutChatUseCase({ sessions, audit });
   const createCompanyUser = new CreateCompanyUserUseCase({ repository: companyUsers, hasher, audit });
   const listCompanyUsers = new ListCompanyUsersUseCase({ repository: companyUsers });
-  const updateCompanyUser = new UpdateCompanyUserUseCase({ repository: companyUsers, hasher, audit });
+  const updateCompanyUser = new UpdateCompanyUserUseCase({
+    repository: companyUsers,
+    hasher,
+    audit,
+    sessions,
+  });
   const listChatSessions = new ListChatSessionsUseCase({ sessions });
   const revokeChatSession = new RevokeChatSessionUseCase({ sessions, audit });
 
@@ -143,9 +153,13 @@ export function wireIdentity(
         role: found.owner.role,
       };
     },
-    async startLogin(channel: ChatChannel, contactId: string): Promise<string> {
+    async startLogin(channel: ChatChannel, contactId: string): Promise<LoginLinkDelivery> {
       const generated = await generateLoginLink.execute({ channel, contactId });
-      return generated.url;
+      // Si el contacto ya tenía un enlace vigente se reutiliza: no se genera un
+      // token nuevo ni se invalida el que el usuario ya tiene.
+      return generated.kind === "created"
+        ? { status: "issued", url: generated.url }
+        : { status: "reused" };
     },
     async logout(channel: ChatChannel, contactId: string): Promise<void> {
       await logoutChat.execute({ channel, contactId });

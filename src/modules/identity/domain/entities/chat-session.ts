@@ -13,11 +13,18 @@ export interface ChatSession {
   createdAt: Date;
 }
 
+/**
+ * Dueño de la sesión: el usuario de empresa (cliente) que la tiene abierta.
+ * `active` y `lockedUntil` determinan si ese cliente sigue AUTORIZADO para
+ * usar el chatbot; la comprobación se hace en cada mensaje.
+ */
 export interface ChatSessionOwner {
   id: string;
   displayName: string;
   role: CompanyRole;
   active: boolean;
+  /** Bloqueo temporal por intentos fallidos; si está vigente, el cliente no está autorizado. */
+  lockedUntil: Date | null;
 }
 
 export interface ChatSessionWithOwner {

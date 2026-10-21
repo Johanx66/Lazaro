@@ -3,6 +3,8 @@ import type { CreateLoginLinkInput, LoginLink } from "../entities/login-link.js"
 export interface LoginLinkRepository {
   create(input: CreateLoginLinkInput): Promise<LoginLink>;
   findByTokenHash(tokenHash: string): Promise<LoginLink | null>;
+  /** Devuelve el enlace vigente (no usado y no expirado) de un contacto, si lo hay. */
+  findActiveForContact(channel: string, contactId: string, now: Date): Promise<LoginLink | null>;
   /** Marca el enlace como usado. Idempotente si ya estaba usado. */
   markUsed(id: string, usedAt: Date): Promise<void>;
   /** Consume un enlace si está activo (no usado y no expirado). Retorna true si fue consumido. */

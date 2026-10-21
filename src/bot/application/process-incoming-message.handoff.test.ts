@@ -87,6 +87,13 @@ function setup(initialStatus: ConversationStatus) {
     users: { findOrCreateUser: async () => ({ id: "u1" }) } as UserAccountPort,
     conversations: ports,
     knowledge: { findAnswer },
+    // Contacto verificado: la puerta de verificación se prueba en su propio test.
+    identity: {
+      getActiveSessionName: async () => "Ana",
+      getActivePrincipal: async () => ({ companyUserId: "u1", displayName: "Ana", role: "USER" }),
+      startLogin: async () => ({ status: "issued" as const, url: "https://app.example/login?t=token" }),
+      logout: async () => undefined,
+    },
   });
 
   return { conversation, savedContents, transferSpy, findAnswer, useCase };

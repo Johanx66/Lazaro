@@ -125,6 +125,20 @@ export class InMemoryLoginLinkRepository implements LoginLinkRepository {
     return [...this.store.values()].find((link) => link.tokenHash === tokenHash) ?? null;
   }
 
+  async findActiveForContact(channel: string, contactId: string, now: Date): Promise<LoginLink | null> {
+    return (
+      [...this.store.values()]
+        .filter(
+          (link) =>
+            link.channel === channel &&
+            link.contactId === contactId &&
+            link.usedAt === null &&
+            link.expiresAt.getTime() > now.getTime(),
+        )
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null
+    );
+  }
+
   async markUsed(id: string, usedAt: Date): Promise<void> {
     const link = this.store.get(id);
     if (link && link.usedAt === null) link.usedAt = usedAt;
@@ -203,12 +217,29 @@ export class InMemoryChatSessionRepository implements ChatSessionRepository {
     if (session && session.revokedAt === null) session.revokedAt = revokedAt;
   }
 
+  async revokeAllByCompanyUser(companyUserId: string, revokedAt: Date): Promise<number> {
+    let revoked = 0;
+    for (const session of this.store.values()) {
+      if (session.companyUserId === companyUserId && session.revokedAt === null) {
+        session.revokedAt = revokedAt;
+        revoked += 1;
+      }
+    }
+    return revoked;
+  }
+
   private async withOwner(session: ChatSession): Promise<ChatSessionWithOwner> {
     const owner = await this.users.findById(session.companyUserId);
     if (!owner) throw new Error("el dueño de la sesión no existe");
     return {
       session,
-      owner: { id: owner.id, displayName: owner.displayName, role: owner.role, active: owner.active },
+      owner: {
+        id: owner.id,
+        displayName: owner.displayName,
+        role: owner.role,
+        active: owner.active,
+        lockedUntil: owner.lockedUntil,
+      },
     };
   }
 }

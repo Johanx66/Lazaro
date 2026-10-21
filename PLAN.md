@@ -19,6 +19,7 @@ Reglas: ver `AGENTS.md`. Se trabaja UNA fase a la vez.
 | 6 | Despliegue en el servidor de la empresa | **COMPLETADA** |
 | 7 | WhatsApp real | **pendiente** |
 | 8 | Canal Telegram (webhook de la Bot API) | **COMPLETADA** |
+| 9 | Puerta de verificación obligatoria (todo contacto sin sesión recibe el mensaje estático y el enlace; cero IA) | **EN CURSO** — puerta y revocación por cambio de teléfono implementadas; revisión de permisos hecha. Quedan 4 decisiones funcionales del dueño (rol ADMIN en el chat, mapeo `customer_id`, PQRS en el chat, configuración de Telegram) |
 
 Nota: todavía no hay número de WhatsApp. Todo se desarrolla y prueba con el chat web
 simulado. WhatsApp se conecta al final como un adaptador más.
@@ -292,3 +293,55 @@ Hecha (detalle y salida literal en `AUDIT.md` → "Fase 8"):
 respondible desde el panel; webhook rechaza peticiones sin el secreto.
 **Nota:** `TELEGRAM_SKIP_PHONE_MATCH` documenta deuda (chat.id guardado en
 `User.phone`; identidades distintas por canal) — ver `AUDIT.md`.
+
+---
+
+## FASE 9 — Puerta de verificación obligatoria (en curso)
+
+Hecho (detalle, limitaciones y salida literal en `AUDIT.md` → "Puerta de verificación
+obligatoria"):
+
+1. Todo contacto **sin sesión vigente** recibe el mensaje estático obligatorio más el
+   enlace de acceso; **ningún** mensaje suyo llega a la IA (ni preguntas, ni quejas,
+   reclamos, peticiones, PQRS ni sugerencias, ni "quiero hablar con una persona").
+2. La puerta está en `ProcessIncomingMessageUseCase.execute`, por donde pasan los tres
+   canales; sin el módulo de identidad se deniega (fail closed), no hay bypass.
+3. Se reutiliza el enlace vigente del contacto (no se generan enlaces repetidos ni se
+   invalida el que el usuario ya tiene). Solo se crea otro si expiró o se consumió.
+4. El token nunca se guarda en el historial, ni en la auditoría, ni en los logs.
+5. Al cambiar el `registeredPhone` de un cliente se revocan todas sus sesiones
+   abiertas: el contacto anterior no puede seguir usando la sesión y el cliente
+   debe volver a verificarse (una sola sentencia `updateMany`, revoción **antes** de
+   guardar el teléfono nuevo).
+6. Revisión de permisos reales hecha sobre el código (detalle y preguntas en
+   `AUDIT.md` → "Revisión de permisos reales"): aislamiento de datos por
+   `company_users.id` en las tres herramientas, ausencia de funcionalidad PQRS, y
+   garantía real de la vinculación en Telegram.
+
+**Decidido por el dueño del proyecto (esta fase):**
+
+1. **Reenvío de enlaces:** se mantiene el diseño "solo hash" (el enlace **no** se
+   reenvía; hay que esperar al TTL, 10 min por defecto). No se implementa A, B ni C.
+
+**Pendiente de mi decisión (preguntas concretas y solución mínima propuesta en
+`AUDIT.md`):**
+
+1. **Rol en el chat:** hoy cualquier cuenta de empresa activa puede hablar por el
+   chat, incluida una cuenta con `role = ADMIN` (empleado). Si un `ADMIN` no debe
+   poder actuar como cliente, la regla mínima es un solo punto de comprobación
+   (`CHAT_LOGIN_ALLOWED_ROLES` en `policy.ts`) sin tocar el esquema.
+2. **Mapeo de `customer_id`:** las herramientas filtran por `company_users.id`; la
+   empresa debe poblar sus vistas con ese id (o, si usa su propio código de cliente,
+   hace falta una columna de correspondencia: cambio de esquema con migración).
+3. **PQRS en el chat:** hoy no existe funcionalidad de PQRS; los mensajes de ese tipo
+   terminan en transferencia a asesor y el cliente no puede consultar su radicado.
+   Si debe poder verlo, la vía mínima es una herramienta de solo lectura aislada por
+   `user_id`.
+4. **Telegram:** con los valores por defecto de producción el login de Telegram no
+   puede funcionar (el `chat.id` tendría que coincidir con `registeredPhone`). Hay
+   que registrar el `chat.id` como teléfono **o** activar
+   `TELEGRAM_SKIP_PHONE_MATCH=true` (debilita la vinculación a "enlace + credenciales").
+
+**Criterio:** ningún mensaje de un contacto sin verificar genera llamadas a la IA, en
+ningún canal, y el enlace se entrega una sola vez mientras siga vigente. La fase
+**no se cierra** hasta que se decida lo anterior.

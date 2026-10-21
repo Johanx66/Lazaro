@@ -43,16 +43,30 @@ export interface DataQueryPort {
 }
 
 /**
+ * Entrega del enlace de acceso a un contacto:
+ * - `issued`: se generó un enlace nuevo; `url` es la URL absoluta a entregar.
+ * - `reused`: el contacto ya tenía un enlace vigente, así que se reutiliza (no se
+ *   genera un token nuevo ni se invalida el que el usuario ya tiene).
+ */
+export type LoginLinkDelivery =
+  | { status: "issued"; url: string }
+  | { status: "reused" };
+
+/**
  * Puerto de identidad del chat. Lo implementa el módulo `identity`. Permite al bot
  * gestionar la sesión (login/salir) sin depender de sus detalles.
  */
 export interface ChatIdentityPort {
   /** Nombre para mostrar de la sesión vigente del contacto, o null si no hay. */
   getActiveSessionName(channel: ChatChannel, contactId: string): Promise<string | null>;
-  /** Identidad autenticada de la sesión vigente, o null si no hay. */
+  /**
+   * Identidad autenticada de la sesión vigente, o null si no hay.
+   * Devuelve null si el contacto no está verificado, si su sesión venció o se
+   * revocó, o si su cuenta de cliente dejó de estar autorizada.
+   */
   getActivePrincipal(channel: ChatChannel, contactId: string): Promise<ChatSessionPrincipal | null>;
-  /** Genera un enlace de login de un solo uso y devuelve su URL absoluta. */
-  startLogin(channel: ChatChannel, contactId: string): Promise<string>;
+  /** Entrega un enlace de login de un solo uso: nuevo o reutilizado si ya había uno vigente. */
+  startLogin(channel: ChatChannel, contactId: string): Promise<LoginLinkDelivery>;
   /** Cierra la sesión vigente del contacto, si la hay. Idempotente. */
   logout(channel: ChatChannel, contactId: string): Promise<void>;
 }
@@ -82,8 +96,31 @@ export interface ProcessIncomingMessageResult {
 const DEFAULT_FALLBACK_REPLY =
   "No pude resolver tu consulta. Un agente humano te atenderá en unos instantes.";
 
+// Mensaje estático OBLIGATORIO para todo contacto sin sesión vigente. Nunca se
+// genera con IA y no contiene datos sensibles (el acceso se completa en /login,
+// nunca pidiendo contraseña ni token por el chat).
+export const UNVERIFIED_REPLY =
+  "¡Hola! 😊 Para poder conversar contigo y ayudarte, primero necesitas verificar tu identidad. Por favor, completa el proceso de verificación y después podrás continuar. ¡Gracias por tu comprensión!";
+
+// Variante con el enlace de verificación de un solo uso que se envía en el
+// PRIMER mensaje de un contacto no verificado.
+const UNVERIFIED_REPLY_WITH_LINK = (url: string): string =>
+  `${UNVERIFIED_REPLY}\n\nVerifica tu identidad con este enlace (válido por poco tiempo): ${url}`;
+
+// El contacto ya tenía un enlace vigente: se reutiliza el que ya tiene, así que
+// no se envía una URL nueva (el token no se puede recuperar: solo se guarda su hash).
+const UNVERIFIED_REPLY_LINK_SENT = `${UNVERIFIED_REPLY}\n\nYa te enviamos un enlace de acceso (válido por poco tiempo). Ábrelo en este chat para completar la verificación.`;
+
+// No hay sesión que cerrar y no corresponde generar enlace de verificación.
+const NO_ACTIVE_SESSION_REPLY =
+  "No tienes una sesión activa. Si necesitas consultar tus datos, escribe \"iniciar sesión\" para recibir un enlace de acceso.";
+
 const LOGIN_LINK_REPLY = (url: string): string =>
   `Para consultar tus datos, inicia sesión con este enlace (válido por poco tiempo): ${url}`;
+
+// Ya existe un enlace vigente del contacto: se reutiliza el que ya tiene.
+const LOGIN_LINK_ALREADY_SENT =
+  "Ya te enviamos un enlace de acceso (válido por poco tiempo). Ábrelo para iniciar sesión.";
 
 // Texto que se persiste en el historial en lugar del enlace real: el token del
 // enlace es una credencial y nunca debe quedar guardado en la tabla de mensajes.
@@ -188,11 +225,7 @@ export class ProcessIncomingMessageUseCase {
       channel,
     });
 
-    if (isHumanRequest(text)) {
-      resetMissCount(conversation.id);
-      return this.transfer(conversation.id, user.id, phone, name, text, "HUMAN_REQUEST");
-    }
-
+    // El mensaje del contacto se persiste siempre, incluso si está bloqueado.
     const sent = await this.deps.conversations.sendMessage({
       conversationId: conversation.id,
       userId: user.id,
@@ -207,6 +240,18 @@ export class ProcessIncomingMessageUseCase {
         handledByBot: false,
         status: sent.status,
       };
+    }
+
+    // PUERTA DE VERIFICACIÓN: ningún mensaje sin sesión vigente llega a la IA.
+    // Se comprueba ANTES de la transferencia, las intenciones de identidad, el
+    // clasificador y la base de conocimiento, de modo que una pregunta, queja,
+    // reclamo, petición, PQRS o sugerencia no pueda saltarse la verificación.
+    const gate = await this.handleUnverifiedGate(text, channel, phone, conversation.id);
+    if (gate) return gate;
+
+    if (isHumanRequest(text)) {
+      resetMissCount(conversation.id);
+      return this.transfer(conversation.id, user.id, phone, name, text, "HUMAN_REQUEST");
     }
 
     const identityReply = await this.handleIdentityIntent(
@@ -234,6 +279,70 @@ export class ProcessIncomingMessageUseCase {
     }
 
     return this.registerMiss(conversation.id, user.id, phone, name, text);
+  }
+
+  /**
+   * Denegación por defecto: si no se puede confirmar una sesión vigente Y un
+   * cliente AUTORIZADO (`getActivePrincipal` solo devuelve no-null cuando la
+   * sesión no está revocada ni vencida y el usuario de empresa está activo),
+   * se responde con el mensaje estático de verificación y el enlace de un solo
+   * uso, sin invocar ninguna IA.
+   *
+   * Devuelve null si el contacto está verificado y puede continuar el flujo.
+   */
+  private async handleUnverifiedGate(
+    text: string,
+    channel: ChatChannel,
+    contactId: string,
+    conversationId: string,
+  ): Promise<ProcessIncomingMessageResult | null> {
+    const identity = this.deps.identity;
+    // Sin puerto de identidad no hay forma de verificar: se deniega (fail closed).
+    if (!identity) {
+      const botReply = await this.deps.conversations.recordBotReply(
+        conversationId,
+        UNVERIFIED_REPLY,
+      );
+      return {
+        conversationId,
+        reply: UNVERIFIED_REPLY,
+        handledByBot: false,
+        status: botReply.status,
+      };
+    }
+
+    const principal = await identity.getActivePrincipal(channel, contactId);
+    if (principal) return null;
+
+    // "Salir" sin sesión: no hay nada que cerrar y no corresponde enlace.
+    if (isLogoutRequest(text)) {
+      const botReply = await this.deps.conversations.recordBotReply(
+        conversationId,
+        NO_ACTIVE_SESSION_REPLY,
+      );
+      return {
+        conversationId,
+        reply: NO_ACTIVE_SESSION_REPLY,
+        handledByBot: false,
+        status: botReply.status,
+      };
+    }
+
+    const delivery = await identity.startLogin(channel, contactId);
+    // En el historial se guarda el sustituto sin token, nunca el enlace real.
+    const botReply = await this.deps.conversations.recordBotReply(
+      conversationId,
+      LOGIN_LINK_RECORDED,
+    );
+    return {
+      conversationId,
+      reply:
+        delivery.status === "issued"
+          ? UNVERIFIED_REPLY_WITH_LINK(delivery.url)
+          : UNVERIFIED_REPLY_LINK_SENT,
+      handledByBot: false,
+      status: botReply.status,
+    };
   }
 
   /** Enruta el mensaje según la intención detectada por el clasificador (Fase 5). */
@@ -299,7 +408,9 @@ export class ProcessIncomingMessageUseCase {
         resetMissCount(conversationId);
         return this.transfer(conversationId, userId, phone, name, text, "LOW_CONFIDENCE");
       }
-      const reply = LOGIN_LINK_REPLY(await identity.startLogin(channel, phone));
+      const delivery = await identity.startLogin(channel, phone);
+      const reply =
+        delivery.status === "issued" ? LOGIN_LINK_REPLY(delivery.url) : LOGIN_LINK_ALREADY_SENT;
       resetMissCount(conversationId);
       const botReply = await this.deps.conversations.recordBotReply(conversationId, LOGIN_LINK_RECORDED);
       return { conversationId, reply, handledByBot: true, status: botReply.status };
@@ -399,7 +510,9 @@ export class ProcessIncomingMessageUseCase {
         const botReply = await this.deps.conversations.recordBotReply(conversationId, reply);
         return { conversationId, reply, handledByBot: true, status: botReply.status };
       }
-      const reply = LOGIN_LINK_REPLY(await identity.startLogin(channel, contactId));
+      const delivery = await identity.startLogin(channel, contactId);
+      const reply =
+        delivery.status === "issued" ? LOGIN_LINK_REPLY(delivery.url) : LOGIN_LINK_ALREADY_SENT;
       const botReply = await this.deps.conversations.recordBotReply(conversationId, LOGIN_LINK_RECORDED);
       return { conversationId, reply, handledByBot: true, status: botReply.status };
     }

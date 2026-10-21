@@ -86,6 +86,25 @@ describe("ChatSessionService", () => {
     expect(await service.getActive("WEB", "570000000001")).toBeNull();
   });
 
+  it("un usuario bloqueado temporalmente no está autorizado y su sesión se revoca", async () => {
+    const user = users.addUser({ username: "ana", passwordHash: "x" });
+    await service.create(user.id, "WEB", "570000000001");
+    expect(await service.getActive("WEB", "570000000001")).not.toBeNull();
+
+    // Bloqueo por intentos fallidos vigente: el cliente deja de estar autorizado.
+    await users.lockUntil(user.id, new Date(clock.now().getTime() + 15 * MINUTE));
+    expect(await service.getActive("WEB", "570000000001")).toBeNull();
+  });
+
+  it("un bloqueo ya vencido no impide la sesión", async () => {
+    const user = users.addUser({ username: "ana", passwordHash: "x" });
+    await service.create(user.id, "WEB", "570000000001");
+
+    await users.lockUntil(user.id, new Date(clock.now().getTime() + 5 * MINUTE));
+    clock.advance(6 * MINUTE);
+    expect(await service.getActive("WEB", "570000000001")).not.toBeNull();
+  });
+
   it("revokeByContact cierra la sesión vigente", async () => {
     const user = users.addUser({ username: "ana", passwordHash: "x" });
     await service.create(user.id, "WEB", "570000000001");

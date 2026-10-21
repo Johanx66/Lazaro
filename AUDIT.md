@@ -682,3 +682,262 @@ entorno (daemon no disponible); la validación del contrato se hace por test sob
 SQL de las herramientas y el archivo de demo.
 
 
+## Puerta de verificación obligatoria (fase en curso, NO cerrada)
+
+### Qué se hizo
+
+Todo contacto **sin sesión vigente** recibe un mensaje estático y **ningún** mensaje
+suyo llega a la IA. La puerta está en un solo punto
+(`ProcessIncomingMessageUseCase.execute`, `src/bot/application/process-incoming-message.ts`),
+que es por donde pasan los tres canales (`/dev/chat`, `/webhooks/whatsapp`,
+`/webhooks/telegram` → `HandleInboundMessageUseCase` → `processor.execute`); no existe
+ningún endpoint interno que la salte.
+
+- Mensaje estático obligatorio (`UNVERIFIED_REPLY`) + enlace de acceso generado con
+  `identity.startLogin(channel, contactId)`.
+- La puerta corre **antes** de la transferencia a asesor, de las intenciones de
+  identidad, del clasificador y de la base de conocimiento: una pregunta, queja,
+  reclamo, petición, PQRS o sugerencia **no** puede saltarse la verificación.
+- Sin puerto `identity` la denegación es la regla (fail closed): no hay bypass.
+- "Salir" sin sesión → mensaje estático, sin enlace. "Iniciar sesión" con sesión
+  vigente → aviso estático de sesión iniciada (sin IA).
+- El token **no** se guarda en el historial (se persiste un sustituto), ni en la
+  auditoría, ni en los logs (se redacta en los remitentes mock: `redactLoginLinks`).
+- **Revocación de sesiones al cambiar el teléfono registrado** (decisión del dueño del
+  proyecto, aplicada en esta fase): `UpdateCompanyUserUseCase` revoca **todas** las
+  sesiones abiertas del cliente cuando cambia `registeredPhone`. El contacto anterior
+  no puede seguir usando la sesión y el cliente debe volver a verificarse.
+
+### Reutilización de enlaces de acceso
+
+`GenerateLoginLinkUseCase` ahora **reutiliza** el enlace vigente del contacto: si
+existe uno no usado y no expirado, no se genera un token nuevo **y no se invalida**
+el que el usuario ya tiene. Solo se crea otro cuando el anterior expiró, fue
+consumido o nunca existió (`findActiveForContact`).
+
+**Limitación conocida (no resuelta por diseño):** `LoginLink` guarda **solo el hash
+SHA-256** del token, así que la URL no se puede reconstruir y el enlace **no se puede
+reenviar**: si el usuario lo perdió, hay que esperar al vencimiento
+(`LOGIN_LINK_TTL_MINUTES`, 10 por defecto) o pedir uno nuevo al expirar. Reenviar la
+misma URL exigiría guardar el token en forma recuperable, que es un cambio de
+seguridad que NO se hizo:
+
+- **A. Guardar el token en claro en la BD** → habría quetumbar el diseño "solo hash"
+  (una filtración de la BD daría enlaces de acceso utilizables). Descartado.
+- **B. Guardar el token cifrado (AES-256-GCM) con una clave en `env.ts`** → mantiene la
+  propiedad "en la BD no hay tokens en claro", pero exige clave nueva, rotación,
+  migración de esquema y migración de los enlaces ya emitidos. Es la opción
+  recomendada **si** hace falta el reenvío inmediato.
+- **C. Derivar el token de forma determinista (HMAC con secreto del servidor) sobre el
+  `id` de `LoginLink`** → permite recomputarlo sin guardarlo en claro, pero cambia la
+  semántica de los tokens y añade un secreto global (su rotación invalidaría todos los
+  enlaces pendientes).
+
+Pendiente de decisión del dueño del proyecto: **A/B/C o dejarlo como está (B sin
+reenvío)**.
+
+### Autorización real del cliente (revisión solicitada)
+
+**Fuente de verdad:** la tabla `company_users` (modelo `CompanyUser`). No existe un
+registro de "clientes" aparte: **un cliente ES una cuenta de empresa creada por el
+administrador de esa empresa** (`POST /api/company-users`, protegido con sesión de
+admin + `requireRole("ADMIN")`). Un contacto se convierte en cliente autorizado solo
+si completa `ChatLoginUseCase`, que exige, en este orden: enlace vigente y no usado,
+usuario existente, `active = true`, cuenta no bloqueada, contraseña correcta y — si
+está activo `REQUIRE_PHONE_MATCH` — coincidencia entre el teléfono del contacto y
+`registeredPhone` (excepción en Telegram si `TELEGRAM_SKIP_PHONE_MATCH`). Solo
+entonces se crea un `ChatSession` ligado a `(channel, contactId)`.
+
+**Qué se comprueba en CADA mensaje (no solo al iniciar sesión):**
+`getActivePrincipal` → `ChatSessionService.getActive` devuelve null (y revoca la
+sesión) si la sesión está revocada, vencida por inactividad o por tope absoluto, **si
+el dueño está inactivo** (`owner.active === false`) **o si el dueño está bloqueado
+temporalmente** (`lockedUntil` vigente, nuevo control de esta fase). Por tanto un
+principal no nulo implica: sesión vigente **y** cliente autorizado (cuenta existente,
+activa y no bloqueada).
+
+**Limitaciones que no se pueden demostrar con el modelo actual (sin inventar tablas
+ni campos):**
+
+1. No existe autorización **por canal**: la misma cuenta sirve para WhatsApp, Telegram
+   y web. En Telegram el `contactId` es un `chat.id`, no un teléfono, así que con
+   `TELEGRAM_SKIP_PHONE_MATCH=true` la única garantía es "poseer el enlace entregado
+   a ese chat + credenciales correctas".
+2. No existe autorización **por alcance**: el rol (`USER`/`ADMIN`) solo controla el
+   panel de administración; un `ADMIN` no tiene más permisos de datos en el chat que
+   un `USER` (la consulta a la BD se limita a las vistas de solo lectura de la BD de
+   la empresa).
+3. `role = ADMIN` es una cuenta de empresa con permisos de panel; **no** es una
+   distinción entre "cliente" y "empleado" de la empresa.
+
+**Hueco 3 de una versión anterior de este documento — cerrado en esta fase:** la
+coincidencia de teléfono se exigía solo al iniciar sesión, de modo que cambiar
+`registeredPhone` con una sesión abierta la dejaba viva. Ahora, al cambiar
+`registeredPhone` se revocan todas las sesiones abiertas del cliente:
+
+- `ChatSessionRepository.revokeAllByCompanyUser(companyUserId, revokedAt)` → una sola
+  sentencia (`updateMany`) que revoca todas las sesiones abiertas del cliente; en
+  Prisma es atómica para todas sus sesiones.
+- `ChatSessionService.revokeByCompanyUser(companyUserId)` → usa el reloj del servicio.
+- `UpdateCompanyUserUseCase` compara el teléfono actual con el nuevo y, **si cambia**,
+  revoca **antes** de guardar. El orden es deliberado: si la actualización falla
+  después, el único efecto es que el cliente tenga que verificarse otra vez; nunca
+  queda una sesión viva con un teléfono que ya no le corresponde. Si el teléfono se
+  reescribe igual, o se cambian otros campos (nombre, rol, contraseña), **no** se
+  revoca nada.
+- Se audita con la acción `CHAT_SESSIONS_REVOKED` (motivo `registeredPhone_changed`).
+- La desactivación de la cuenta (`active = false`) ya se aplicaba en el siguiente
+  mensaje, porque `getActive` comprueba `owner.active` y `owner.lockedUntil`.
+
+### Revisión de permisos reales (encargo de la fase 9)
+
+Comprobación hecha sobre el código, no sobre supuestos. Cada punto indica la regla
+**tal como está implementada** y, cuando hace falta una decisión que el código no
+puede deducir, la pregunta concreta y la solución mínima.
+
+**1. Qué cuentas pueden usar el chatbot.** Regla actual: **cualquier cuenta de
+`company_users` activa y no bloqueada**, con rol `USER` o `ADMIN`. No hay un tipo de
+cuenta "cliente": el rol no se comprueba ni al iniciar sesión (`ChatLoginUseCase`
+comprueba `active`, `lockedUntil` y la contraseña) ni en la puerta de verificación
+(`getActivePrincipal` no mira el rol). Un `ADMIN` de empresa **puede** hablar por el
+chat y usar las herramientas de datos (`allowedRoles: ['USER','ADMIN']` en las tres
+herramientas).
+
+- **Pregunta (decisión del dueño del proyecto):** ¿una cuenta de empresa con
+  `role = ADMIN` (empleado) debe poder abrir sesión de chat como cliente? Hoy puede.
+- **Solución mínima propuesta (sin tablas ni campos nuevos):** hacer explícita la
+  regla en un único sitio — una constante `CHAT_LOGIN_ALLOWED_ROLES` en
+  `src/modules/identity/application/policy.ts` que `ChatLoginUseCase` compruebe al
+  iniciar sesión — con el valor actual (`['USER','ADMIN']`) para no cambiar el
+  comportamiento, de modo que la decisión sea un cambio de una línea cuando se tome.
+
+**2. Un usuario autenticado solo ve sus datos (y los de su empresa).** Las tres
+herramientas filtran **siempre** por el usuario autenticado y nunca por lo que el
+modelo pide:
+
+| Herramienta | Filtro |
+|---|---|
+| `get_customer_balance` | `WHERE customer_id = $1` → `company_users.id` |
+| `get_order_status` | `WHERE order_id = $1 AND customer_id = $2` → `company_users.id` |
+| `get_recent_orders` | `WHERE customer_id = $1 ORDER BY created_at DESC LIMIT $2` → `company_users.id` |
+
+`context.authenticatedUserId` sale **solo** de la sesión de chat
+(`session.companyUserId`), nunca del texto del usuario ni de lo que elige el modelo;
+los parámetros del modelo se validan con Zod, el SQL es parametrizado y el rol lo
+comprueba el **código** (`tool.allowedRoles.includes(session.role)`), no el modelo.
+No hay IDOR: un cliente no puede pedir la orden de otro.
+
+**Lo que sí hay que tener en cuenta al instalar (contrato de datos):** el `customer_id`
+de la BD de la empresa debe ser **el `id` de `company_users`** (ya está documentado en
+`scripts/demo-company-db.sql:38`). Los datos ficticios de demostración usan
+`customer_id` = `usr_101` / `usr_102`, que son ids de la tabla antigua `users` y **no**
+de `company_users`: por eso, en la demo, un cliente verificado recibe "No encontré
+información" en vez de su saldo. El filtro se aplica siempre, así que esto no provoca
+una fuga, sino datos de menos.
+
+- **Pregunta:** ¿la empresa va a poblar sus vistas con `company_users.id` o va a
+  mapear su código de cliente propio? Si usa su propio código, hace falta una
+  columna en `company_users` (o una tabla de correspondencia).
+- **Solución mínima propuesta:** sin cambios de código, alinear los datos de la
+  empresa con el contrato ya documentado; si la empresa usa otro código, añadir una
+  columna `externalCustomerId` a `company_users` y usarla como `customer_id`
+  (sería un cambio de esquema con migración versionada).
+
+**3. Funcionalidades de PQRS.** **No existen.** En el repositorio no hay tablas,
+casos de uso ni rutas de PQRS (`grep` de `pqrs|petición|reclamo|queja|sugerencia`
+solo encuentra comentarios y los textos bloqueados del test de verificación). Lo que
+existe hoy:
+
+- Un mensaje de tipo PQRS **sin sesión** lo bloquea la puerta de verificación
+  (mensaje estático + enlace), igual que cualquier otro mensaje.
+- Un mensaje de tipo PQRS **con sesión** pasa al clasificador; según la intención
+  detectada se responde por IA o se transfiere a un asesor
+  (`TransferToHumanUseCase`), que crea un `Ticket` **idempotente por conversación**
+  (`CreateTicketUseCase` devuelve el ticket abierto si ya existe).
+- Los tickets y las conversaciones **no** son consultables por el cliente del chat:
+  `/api/conversations` y `/api/agent` exigen sesión de administrador o asesor
+  (`requireRole("ADMIN", "AGENT")`) y el cliente del chat no tiene ese tipo de
+  sesión (su identidad vive en `company_users`, no en `admin_users`).
+- **Pregunta:** ¿la empresa quiere que el cliente del chat pueda consultar el estado
+  de su radicado (PQRS)? Hoy no puede.
+- **Solución mínima propuesta:** exponer en el chat una herramienta de solo lectura
+  (`get_my_tickets`) con el mismo patrón de aislamiento (`WHERE conversation_id IN
+  (...) AND user_id = $1`), sin tocar el panel.
+
+**4. Qué garantiza realmente la vinculación en Telegram.** Lo verificado:
+
+- El `contactId` de Telegram es `String(chat.id)` (id numérico del chat), **no** un
+  teléfono y **no** el `@username`; `message.from.username` se recibe pero no se usa.
+- La **única** vinculación entre la cuenta de Telegram y la cuenta de empresa es el
+  `ChatSession` que se crea tras un login correcto: possession del enlace entregado a
+  ese chat + usuario existente + `active` + no bloqueado + contraseña correcta (y
+  coincidencia de teléfono si `REQUIRE_PHONE_MATCH`).
+- El webhook de Telegram valida el `secret_token` con comparación en tiempo constante
+  y falla cerrado (401), limita por IP y por chat, y deduplica `update_id`.
+- **Con los valores por defecto en producción** (`REQUIRE_PHONE_MATCH` sin definir =
+  `true`; `TELEGRAM_SKIP_PHONE_MATCH` sin definir = `false`), el login de Telegram
+  **nunca** funciona: el `chat.id` numérico tendría que coincidir con
+  `registeredPhone`. La empresa debe registrar el `chat.id` como teléfono del cliente
+  **o** poner `TELEGRAM_SKIP_PHONE_MATCH=true` (con lo que la garantía se reduce a
+  "enlace + credenciales").
+- **Pregunta:** ¿la empresa registra el `chat.id` como teléfono o activa la excepción
+  de Telegram? Debe elegirse una de las dos al instalar.
+- **Solución mínima propuesta:** es configuración, no código: documentar en el manual
+  de instalación que `TELEGRAM_SKIP_PHONE_MATCH=true` **debilita** la vinculación
+  (el enlace + la contraseña siguen siendo la garantía) y que la alternativa fuerte
+  es registrar el `chat.id` como `registeredPhone`.
+
+**5. Denegación por defecto.** Verificado en los tres puntos de entrada:
+
+- Puerta de verificación: sin puerto `identity` o sin principal vigente, el mensaje
+  es estático y **no** hay llamada a IA.
+- Herramientas: `getAllForRole` vacía → "No tienes permisos…"; y aunque el modelo
+  elija una herramienta prohibida para su rol, el **código** lo rechaza.
+- API: `createRequireSession` exige sesión de administrador en todo `/api/*`, salvo
+  `GET /api/health`, `POST /api/identity/login` y
+  `GET /api/identity/login-link/:token` (públicos por necesidad; el último solo
+  devuelve canal, `contactId` y el contacto enmascarado, nunca el usuario).
+
+**6. Cada mensaje pasa por la puerta antes de cualquier IA o herramienta costosa.**
+Verificado en el orden real de `ProcessIncomingMessageUseCase.execute`:
+`findOrCreateUser` → `startConversation` → `sendMessage` (persiste el mensaje) →
+estado de la conversación → **puerta de verificación** → `isHumanRequest` (palabras
+clave, sin IA) → intenciones de identidad → **clasificador (Ollama)** → base de
+conocimiento → consultas a la BD de la empresa. Antes de la puerta solo hay llamadas
+a la BD propia, ninguna a un modelo. El `BotpressBrain` está dentro del
+`CompositeKnowledgeRepository`, es decir, también queda detrás de la puerta.
+
+### Cómo probarlo
+
+- `npm run typecheck` y `npm test`.
+- Test dedicado: `src/bot/application/process-incoming-message.verification.test.ts`
+  (mensaje exacto, enlace, **0 llamadas** a clasificador/consulta/KB, 3 canales,
+  complaints/PQRS, "quiero hablar con una persona", fail closed sin `identity`).
+- Reutilización: `src/modules/identity/tests/login-link.test.ts` (reutiliza, no
+  invalida, crea tras expirar o consumirse, no reutiliza entre canales).
+- Autorización: `src/modules/identity/tests/chat-session-service.test.ts` (usuario
+  inactivo y usuario bloqueado invalidan la sesión; bloqueo vencido no).
+- Cambio de teléfono: `src/modules/identity/tests/company-user-use-cases.test.ts`
+  (revoca las sesiones al cambiar el teléfono, **no** al cambiar otros datos ni al
+  reescribir el mismo teléfono, auditoría de la revocación) y
+  `src/modules/identity/tests/phone-change-revocation.test.ts` (integración con la
+  puerta: el contacto anterior pierde la sesión, su siguiente mensaje vuelve al
+  mensaje estático sin llamar a la IA, y el cliente puede volver a verificarse).
+
+### Verificación (salida literal)
+
+`npm run typecheck`: exit 0.
+
+```text
+npm notice run chatbot-soporte-backend@0.1.0 typecheck
+npm notice run tsc -p tsconfig.build.json --noEmit
+```
+
+`npm test`: exit 0.
+
+```text
+ Test Files  51 passed (51)
+      Tests  427 passed (427)
+   Start at  13:08:27
+   Duration  42.80s (tests 67%, transform 18%, import 14%, worker 1%)
+```

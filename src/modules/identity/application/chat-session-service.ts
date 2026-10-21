@@ -33,21 +33,35 @@ export class ChatSessionService {
 
   /**
    * Devuelve la sesión vigente de un contacto y renueva su inactividad. Una sesión
-   * vencida (inactividad o tope absoluto), revocada o de un usuario inactivo se revoca
-   * y se trata como inexistente.
+   * vencida (inactividad o tope absoluto), revocada o de un usuario no autorizado
+   * (inactivo o bloqueado temporalmente) se revoca y se trata como inexistente.
+   *
+   * La autorización del cliente no se deduce de la sesión: el dueño de la sesión
+   * debe ser un usuario de empresa activo y no bloqueado. Si deja de estar
+   * autorizado, la sesión se revoca en el acto.
    */
   async getActive(channel: string, contactId: string): Promise<ChatSessionWithOwner | null> {
     const found = await this.deps.repository.findActiveByContact(channel, contactId);
     if (!found) return null;
 
     const now = this.deps.clock.now();
-    if (found.session.revokedAt !== null || !found.owner.active || isChatSessionExpired(found.session, now)) {
+    if (
+      found.session.revokedAt !== null ||
+      !this.isAuthorized(found.owner, now) ||
+      isChatSessionExpired(found.session, now)
+    ) {
       await this.deps.repository.revoke(found.session.id, now);
       return null;
     }
 
     await this.deps.repository.touch(found.session.id, now, new Date(now.getTime() + this.deps.idleMs));
     return found;
+  }
+
+  /** Un cliente está autorizado si su cuenta está activa y no bloqueada temporalmente. */
+  private isAuthorized(owner: ChatSessionWithOwner["owner"], now: Date): boolean {
+    if (!owner.active) return false;
+    return owner.lockedUntil === null || owner.lockedUntil.getTime() <= now.getTime();
   }
 
   async revokeByContact(channel: string, contactId: string): Promise<boolean> {
@@ -65,11 +79,20 @@ export class ChatSessionService {
     return { ...session, revokedAt };
   }
 
+  /**
+   * Revoca todas las sesiones abiertas de un cliente. Se invoca cuando cambia
+   * su teléfono registrado: el contacto anterior no puede seguir usando la
+   * sesión y debe volver a verificarse. Devuelve cuántas se revocaron.
+   */
+  async revokeByCompanyUser(companyUserId: string): Promise<number> {
+    return this.deps.repository.revokeAllByCompanyUser(companyUserId, this.deps.clock.now());
+  }
+
   async listActive(): Promise<ChatSessionWithOwner[]> {
     const active = await this.deps.repository.listActive();
     const now = this.deps.clock.now();
     return active.filter(
-      (found) => !isChatSessionExpired(found.session, now) && found.owner.active,
+      (found) => !isChatSessionExpired(found.session, now) && this.isAuthorized(found.owner, now),
     );
   }
 }
