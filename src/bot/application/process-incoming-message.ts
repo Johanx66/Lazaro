@@ -295,10 +295,19 @@ export class ProcessIncomingMessageUseCase {
       content: text,
     });
 
+    let returnedToBotWithoutTicket = false;
     if ((sent.status === "WAITING_AGENT" || sent.status === "OPEN") && this.deps.conversations.handoff) {
       const handoff = this.deps.conversations.handoff;
       const startedAt = await handoff.findActiveTicketCreatedAt(conversation.id);
-      if (startedAt) {
+      if (!startedAt) {
+        // A stale handoff status must not block the customer if its ticket was
+        // already closed or removed. cancel() also resets the conversation state.
+        await handoff.cancel(conversation.id);
+        returnedToBotWithoutTicket = true;
+        if (isReturnToMenuCommand(text)) {
+          return this.showMenu(conversation.id, channel);
+        }
+      } else {
         const agentHasReplied = await handoff.hasAgentMessage(conversation.id);
         if (!agentHasReplied && Date.now() - startedAt.getTime() >= this.handoffTimeoutMinutes * 60_000) {
           await handoff.cancel(conversation.id);
@@ -320,7 +329,7 @@ export class ProcessIncomingMessageUseCase {
       }
     }
 
-    if (sent.status !== "BOT_HANDLING") {
+    if (sent.status !== "BOT_HANDLING" && !returnedToBotWithoutTicket) {
       resetMissCount(conversation.id);
       return {
         conversationId: conversation.id,
@@ -870,11 +879,10 @@ export class ProcessIncomingMessageUseCase {
       return this.handleDataQuery(toolRequest, userId, conversationId, channel, phone, name);
     }
     if (entry.tool) {
-      const unavailable = "No puedo consultar ese dato en este momento. Si quieres, puedo comunicarte con un asesor.";
-      this.pendingAgentOffers.set(conversationId, text);
-      const saved = await this.deps.conversations.recordBotReply(conversationId, unavailable);
+      resetMissCount(conversationId);
+      const saved = await this.deps.conversations.recordBotReply(conversationId, entry.answer);
       console.log(JSON.stringify({ level: "info", msg: "rag_decision", entryId: entry.id, top1: score, top2: secondScore, decision: "herramienta_no_disponible", escalationMode: entry.escalationMode, latencyMs: Date.now() - startedAt }));
-      return { conversationId, reply: unavailable, handledByBot: true, status: saved.status };
+      return { conversationId, reply: entry.answer, handledByBot: true, status: saved.status };
     }
     const offer = entry.escalationMode === "ofrecer" ? " Si quieres, puedo comunicarte con un asesor." : "";
     const answer = `${entry.answer}${offer}`;
