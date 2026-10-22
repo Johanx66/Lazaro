@@ -125,44 +125,48 @@ COMMIT;
 
 -- 5. Usuario de SOLO LECTURA para el bot. `search_path` fijado al esquema de demo
 --    para que las herramientas encuentren las vistas sin cualificarlas.
---    Crear el rol si no existe (la contraseña llega como variable de psql).
-DO $do$
-DECLARE
-    role_name text := :'readonly_role';
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
-        EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', role_name, :'readonly_password');
-    ELSE
-        EXECUTE format('ALTER ROLE %I PASSWORD %L', role_name, :'readonly_password');
-    END IF;
-    EXECUTE format('ALTER ROLE %I SET search_path = empresa_demo, pg_catalog', role_name);
-END
-$do$;
+--    \gexec ejecuta SQL generado por psql fuera de bloques dollar-quoted para que
+--    las variables readonly_role y readonly_password sí se interpolen.
+SELECT format(
+    'CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS',
+    :'readonly_role', :'readonly_password'
+)
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'readonly_role')
+\gexec
+
+SELECT format(
+    'ALTER ROLE %I WITH LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS',
+    :'readonly_role', :'readonly_password'
+)
+\gexec
+
+SELECT format('ALTER ROLE %I SET search_path = empresa_demo, pg_catalog', :'readonly_role')
+\gexec
+
+-- Quitar membresías previas y los permisos directos en el esquema de demo para
+-- que un rol reutilizado no conserve acceso a las tablas base.
+SELECT format('REVOKE %I FROM %I', parent.rolname, :'readonly_role')
+FROM pg_auth_members membership
+JOIN pg_roles parent ON parent.oid = membership.roleid
+WHERE membership.member = (SELECT oid FROM pg_roles WHERE rolname = :'readonly_role')
+\gexec
 
 -- 6. Permisos MÍNIMOS: conectar + usar el esquema + SELECT SOLO sobre las vistas.
-DO $do$
-DECLARE
-    role_name text := :'readonly_role';
-BEGIN
-    EXECUTE format('GRANT USAGE ON SCHEMA empresa_demo TO %I', role_name);
-    EXECUTE format('GRANT SELECT ON empresa_demo.v_customer_balance TO %I', role_name);
-    EXECUTE format('GRANT SELECT ON empresa_demo.v_orders_status  TO %I', role_name);
-    EXECUTE format('GRANT SELECT ON empresa_demo.v_recent_orders  TO %I', role_name);
-    -- Sin acceso directo a las tablas base.
-    EXECUTE format('REVOKE ALL ON empresa_demo.customers FROM %I', role_name);
-    EXECUTE format('REVOKE ALL ON empresa_demo.orders    FROM %I', role_name);
-END
-$do$;
+SELECT format('GRANT USAGE ON SCHEMA empresa_demo TO %I', :'readonly_role')
+\gexec
+REVOKE ALL ON ALL TABLES IN SCHEMA empresa_demo FROM PUBLIC;
+SELECT format('REVOKE ALL ON ALL TABLES IN SCHEMA empresa_demo FROM %I', :'readonly_role')
+\gexec
+SELECT format('GRANT SELECT ON empresa_demo.v_customer_balance TO %I', :'readonly_role')
+\gexec
+SELECT format('GRANT SELECT ON empresa_demo.v_orders_status TO %I', :'readonly_role')
+\gexec
+SELECT format('GRANT SELECT ON empresa_demo.v_recent_orders TO %I', :'readonly_role')
+\gexec
 
 -- 7. La BD de demo debe permitir conexión al rol de lectura.
-DO $do$
-DECLARE
-    role_name text := :'readonly_role';
-    db_name   text := current_database();
-BEGIN
-    EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', db_name, role_name);
-END
-$do$;
+SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'readonly_role')
+\gexec
 
 \echo 'BD de demostración lista: esquema empresa_demo + vistas + usuario de solo lectura.'
 \echo 'COMPANY_DATABASE_URL de ejemplo (password de demo, no real):'

@@ -99,7 +99,7 @@ describe("env.llmProvider", () => {
 
   it("por defecto es ollama y llmModel queda vacío", async () => {
     delete process.env.LLM_PROVIDER;
-    delete process.env.LLM_MODEL;
+    process.env.LLM_MODEL = "";
     const { env } = await import("./env.js?llm-env-default");
     expect(env.llmProvider).toBe("ollama");
     expect(env.llmModel).toBe("");

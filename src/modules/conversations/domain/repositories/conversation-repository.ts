@@ -64,4 +64,5 @@ export interface ConversationRepository {
   recordEvent(data: AddEventData): Promise<void>;
   /** Últimos `limit` mensajes (antes del cursor si se da), en orden cronológico ascendente. */
   listMessages(conversationId: string, options: ListMessagesOptions): Promise<Message[]>;
+  hasAgentMessage(conversationId: string): Promise<boolean>;
 }

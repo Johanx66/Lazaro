@@ -122,3 +122,44 @@ $env:PUBLIC_BASE_URL="https://<dominio-render>"
 
 > Nota: todos los valores mostrados son de ejemplo.
 
+## RAG para PQRS (experimental, desactivado por defecto)
+
+La base v2 está en `prisma/data/pqrs_base_conocimiento_v2.json` y la evaluación en
+`prisma/data/pruebas_rag.json`. El RAG requiere la migración `0007_knowledge_rag`, una
+importación inicial y un servicio de embeddings accesible. No activa ni crea un sistema
+de radicados: no existe actualmente integración de registro de casos.
+
+Variables de ejemplo:
+- `RAG_ENABLED=false` — deja el flujo actual. Cambiar a `true` solo después de importar
+  y revisar las respuestas.
+- `ALLOW_CLOUDFLARE_EMBEDDINGS=false` — Cloudflare embeddings en producción se bloquea
+  por defecto. Solo configúralo en `true` para pruebas con datos ficticios; el arranque
+  registra una advertencia clara. Cloudflare recibe texto y datos enviados al proveedor.
+- `KB_IMPORT_ON_START=false` — `true` importa/upsertea la base al arrancar y genera los
+  embeddings faltantes; necesita que el proveedor configurado esté accesible desde el
+  contenedor.
+- `EMBEDDING_PROVIDER=ollama`, `EMBEDDING_MODEL=bge-m3` — predeterminado local.
+- `RAG_TOP_K=8`, `RAG_MIN_SCORE=0.55`, `RAG_AMBIGUITY_MARGIN=0.04`.
+- `LLM_TIMEOUT_MS=10000` controla el timeout de embeddings además del LLM.
+- `COMPANY_NAME`, `OFFICIAL_CHANNEL`, `CONDITIONS_URL` — personalizan placeholders.
+
+Para importar desde una máquina con acceso autorizado a la BD y al Ollama local, aplica
+la migración y ejecuta `npm run kb:import`. Para no exponer la BD a internet, configura
+`KB_IMPORT_ON_START=true` en el servicio donde el proveedor de embeddings también sea
+accesible. En Render, el Blueprint actual es Telegram + FAQ y no instala Ollama. Para
+permitir Cloudflare embeddings en producción solo con datos ficticios, configura
+`ALLOW_CLOUDFLARE_EMBEDDINGS=true`; el servicio registrará una advertencia al arrancar.
+No lo uses con datos reales: el texto enviado sale del servidor hacia Cloudflare.
+
+`npm run rag:eval` no necesita PostgreSQL. La primera ejecución genera
+`prisma/data/.rag-embeddings-cache.json` con el proveedor configurado; luego evalúa la
+base de prueba sin llamar a la BD. Para calibrar, ajusta `RAG_MIN_SCORE` y compara top-1,
+top-3 y falsos positivos; no actives el RAG en producción si no cumple las metas de
+precisión o si el contenido aún es genérico.
+
+Los modelos recomendados existen en sus catálogos oficiales: Ollama `bge-m3` y
+Workers AI `@cf/baai/bge-m3`. El adaptador Ollama consume `embeddings` de `/api/embed`;
+el de Cloudflare envía `text` como array al endpoint REST del modelo y lee los vectores
+de `result.data` ([documentación Ollama](https://ollama.com/library/bge-m3),
+[documentación Workers AI](https://developers.cloudflare.com/workers-ai/models/bge-m3/)).
+

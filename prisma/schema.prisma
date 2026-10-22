@@ -290,6 +290,48 @@ model KnowledgeArticle {
   @@index([active])
 }
 
+model KnowledgeEntry {
+  id                   String           @id
+  category             String
+  topic                String
+  intent               String
+  question              String
+  variations            String[]
+  keywords              String[]
+  answer                String
+  answerAfterRegistration String?
+  priority              String
+  escalationMode        String
+  escalationReason      String?
+  requiredData          Json
+  suggestedActions      Json
+  confirmationQuestion  String?
+  tool                  String?
+  active                Boolean          @default(true)
+  chunks                KnowledgeChunk[]
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  @@map("knowledge_entries")
+  @@index([active, category])
+}
+
+model KnowledgeChunk {
+  id        String         @id @default(cuid())
+  entryId   String
+  entry     KnowledgeEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  text      String
+  type      String
+  embedding Json
+  model     String
+  dim       Int
+  hash      String
+  createdAt DateTime       @default(now())
+
+  @@unique([entryId, type, hash])
+  @@index([entryId])
+}
+
 model ConversationEvent {
   id             String               @id @default(cuid())
   conversationId String

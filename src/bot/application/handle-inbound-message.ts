@@ -20,9 +20,15 @@ export class HandleInboundMessageUseCase {
 
   async execute(inbound: InboundMessage): Promise<ProcessIncomingMessageResult> {
     const result = await this.deps.processor.execute(inbound);
-    if (result.menu && this.deps.menuAdapter) {
+    const handoffMenu = (result.status === "WAITING_AGENT" || result.status === "OPEN") && result.reply
+      ? {
+          text: result.reply,
+          buttons: [[{ label: "🔙 Volver al menú", callbackData: "handoff:back" }]],
+        }
+      : null;
+    if ((result.menu ?? handoffMenu) && this.deps.menuAdapter) {
       // El menú se entrega como mensaje con teclado: no se manda el texto suelto.
-      await this.deps.menuAdapter.sendMenu(inbound.contactId, result.menu).catch((error: unknown) => {
+      await this.deps.menuAdapter.sendMenu(inbound.contactId, result.menu ?? handoffMenu!).catch((error: unknown) => {
         console.error(
           JSON.stringify({
             level: "warn",

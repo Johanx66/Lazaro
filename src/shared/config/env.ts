@@ -4,12 +4,18 @@ import { resolveChannelMode } from "./channel-mode.js";
 import { DEFAULT_FAQ_MIN_CONFIDENCE, parseFaqMinConfidence } from "./faq-min-confidence.js";
 import { resolveLlmProvider } from "./llm-provider.js";
 import { DEFAULT_COMPANY_CUSTOMER_ID_PATTERN } from "../../modules/identity/domain/customer-code.js";
+import { DEFAULT_HANDOFF_WAIT_MESSAGE } from "./handoff-messages.js";
+import { isCloudflareEmbeddingsAllowed } from "./cloudflare-embedding-policy.js";
 
 const nodeEnv = process.env.NODE_ENV ?? "development";
 const faqMinConfidence = parseFaqMinConfidence(process.env.FAQ_MIN_CONFIDENCE);
+const ragMinScoreParsed = Number(process.env.RAG_MIN_SCORE ?? "0.55");
+const ragAmbiguityMarginParsed = Number(process.env.RAG_AMBIGUITY_MARGIN ?? "0.04");
+const embeddingProvider = process.env.EMBEDDING_PROVIDER === "cloudflare" ? "cloudflare" : "ollama";
 
 const transferAfterMissesRaw = process.env.TRANSFER_AFTER_MISSES ?? "3";
 const transferAfterMisses = Number(transferAfterMissesRaw);
+const handoffTimeoutRaw = Number(process.env.HANDOFF_TIMEOUT_MINUTES ?? "15");
 
 const publicBaseUrl = (process.env.PUBLIC_BASE_URL ?? "http://localhost:3000").replace(/\/+$/, "");
 const loginLinkTtlMinutes = Number(process.env.LOGIN_LINK_TTL_MINUTES ?? "10");
@@ -54,6 +60,8 @@ export const env = {
   // Un valor inválido lo reporta validateConfig; aquí se usa el valor por defecto.
   faqMinConfidence: faqMinConfidence.ok ? faqMinConfidence.value : DEFAULT_FAQ_MIN_CONFIDENCE,
   transferAfterMisses: Number.isFinite(transferAfterMisses) && transferAfterMisses > 0 ? Math.trunc(transferAfterMisses) : 3,
+  handoffTimeoutMinutes: Number.isFinite(handoffTimeoutRaw) && handoffTimeoutRaw > 0 ? Math.trunc(handoffTimeoutRaw) : 15,
+  handoffWaitMessage: process.env.HANDOFF_WAIT_MESSAGE?.trim() || DEFAULT_HANDOFF_WAIT_MESSAGE,
   whatsappTemplateName: process.env.WHATSAPP_TEMPLATE_NAME ?? "",
   // Base pública absoluta para construir el enlace de login del chat (sin barra final).
   publicBaseUrl,
@@ -92,4 +100,15 @@ export const env = {
   // vincularlo a un usuario del bot. Vacío => patrón por defecto.
   companyCustomerIdPattern:
     (process.env.COMPANY_CUSTOMER_ID_PATTERN ?? "").trim() || DEFAULT_COMPANY_CUSTOMER_ID_PATTERN,
+  ragEnabled: process.env.RAG_ENABLED === "true",
+  allowCloudflareEmbeddings: isCloudflareEmbeddingsAllowed(process.env.ALLOW_CLOUDFLARE_EMBEDDINGS),
+  embeddingProvider,
+  embeddingModel: (process.env.EMBEDDING_MODEL ?? (embeddingProvider === "cloudflare" ? "@cf/baai/bge-m3" : "bge-m3")).trim(),
+  ragTopK: positiveInt(Number(process.env.RAG_TOP_K ?? "8"), 8),
+  ragMinScore: Number.isFinite(ragMinScoreParsed) && ragMinScoreParsed >= 0 && ragMinScoreParsed <= 1 ? ragMinScoreParsed : 0.55,
+  ragAmbiguityMargin: Number.isFinite(ragAmbiguityMarginParsed) && ragAmbiguityMarginParsed >= 0 && ragAmbiguityMarginParsed <= 1 ? ragAmbiguityMarginParsed : 0.04,
+  kbImportOnStart: process.env.KB_IMPORT_ON_START === "true",
+  companyName: (process.env.COMPANY_NAME ?? "").trim(),
+  officialChannel: (process.env.OFFICIAL_CHANNEL ?? "").trim(),
+  conditionsUrl: (process.env.CONDITIONS_URL ?? "").trim(),
 };

@@ -1,0 +1,290 @@
+{
+  "descripcion": "Mensajes de prueba con frases distintas a las de la base. Úsalos para medir acierto (top-1 y top-3) y para calibrar RAG_MIN_SCORE y el margen de ambigüedad.",
+  "casos": [
+    {
+      "mensaje": "hola buenas tardes",
+      "esperado_alguno_de": [
+        "general.saludo"
+      ]
+    },
+    {
+      "mensaje": "dime cuánto es lo que adeudo",
+      "esperado_alguno_de": [
+        "general.consultar_saldo"
+      ]
+    },
+    {
+      "mensaje": "ya pagué ayer por transferencia y sigue saliendo como pendiente",
+      "esperado_alguno_de": [
+        "pago.no_reflejado"
+      ]
+    },
+    {
+      "mensaje": "me llegó un cobro de 80 mil que yo no autoricé",
+      "esperado_alguno_de": [
+        "cobro.no_reconocido"
+      ]
+    },
+    {
+      "mensaje": "pásenme con alguien real por favor",
+      "esperado_alguno_de": [
+        "general.hablar_con_persona"
+      ]
+    },
+    {
+      "mensaje": "mi pedido lleva 10 días y nadie me dice nada",
+      "esperado_alguno_de": [
+        "pedido.demora",
+        "entrega.no_llego"
+      ]
+    },
+    {
+      "mensaje": "el sistema no me deja abrir caja desde esta mañana",
+      "esperado_alguno_de": [
+        "soporte_tecnico.falla_sistema"
+      ]
+    },
+    {
+      "mensaje": "creo que alguien entró a mi cuenta, me cambiaron el correo",
+      "esperado_alguno_de": [
+        "general.fraude_suplantacion"
+      ]
+    },
+    {
+      "mensaje": "quiero que borren mis datos de su base",
+      "esperado_alguno_de": [
+        "datos_personales.supresion"
+      ]
+    },
+    {
+      "mensaje": "¿cuál es la capital de Australia?",
+      "esperado_alguno_de": [
+        "general.fuera_de_alcance"
+      ]
+    },
+    {
+      "mensaje": "la asesora que me atendió fue muy grosera",
+      "esperado_alguno_de": [
+        "atencion_cliente.mala_atencion"
+      ]
+    },
+    {
+      "mensaje": "les sugiero que manden un aviso cuando salga el pedido",
+      "esperado_alguno_de": [
+        "pedido.nueva_funcion",
+        "entrega.nueva_funcion",
+        "pedido.mejora"
+      ]
+    },
+    {
+      "mensaje": "necesito la factura electrónica de mi compra del mes pasado",
+      "esperado_alguno_de": [
+        "factura.documento"
+      ]
+    },
+    {
+      "mensaje": "quiero cancelar mi suscripción",
+      "esperado_alguno_de": [
+        "suscripcion.cancelar"
+      ]
+    },
+    {
+      "mensaje": "la factura salió con el NIT de otra empresa",
+      "esperado_alguno_de": [
+        "factura.datos_errados"
+      ]
+    },
+    {
+      "mensaje": "el producto llegó roto",
+      "esperado_alguno_de": [
+        "producto.problema"
+      ]
+    },
+    {
+      "mensaje": "¿a qué hora cierran?",
+      "esperado_alguno_de": [
+        "general.horario_atencion"
+      ]
+    },
+    {
+      "mensaje": "voy a demandarlos si no me responden",
+      "esperado_alguno_de": [
+        "general.amenaza_legal"
+      ]
+    },
+    {
+      "mensaje": "ya escribí tres veces por lo mismo y nada",
+      "esperado_alguno_de": [
+        "general.repetido_sin_solucion"
+      ]
+    },
+    {
+      "mensaje": "muéstrame mis últimos pedidos",
+      "esperado_alguno_de": [
+        "general.consultar_pedidos_recientes"
+      ]
+    },
+    {
+      "mensaje": "quiero agendar una visita técnica para instalar el sistema",
+      "esperado_alguno_de": [
+        "cita.agendar",
+        "instalacion.info"
+      ]
+    },
+    {
+      "mensaje": "cuánto vale el plan mensual?",
+      "esperado_alguno_de": [
+        "precios.cuanto_cuesta"
+      ]
+    },
+    {
+      "mensaje": "me quemé con el cargador del equipo",
+      "esperado_alguno_de": [
+        "general.riesgo_seguridad_salud"
+      ]
+    },
+    {
+      "mensaje": "olvidé mi clave y no puedo entrar",
+      "esperado_alguno_de": [
+        "cuenta.acceso"
+      ]
+    },
+    {
+      "mensaje": "quiero poner un reclamo formal por la garantía",
+      "esperado_alguno_de": [
+        "garantia.revision_formal"
+      ]
+    },
+    {
+      "mensaje": "me prometieron que me devolvían la plata en 5 días y nada",
+      "esperado_alguno_de": [
+        "reembolso.incumplimiento",
+        "reembolso.problema"
+      ]
+    },
+    {
+      "mensaje": "listo, con eso es todo, muy amable",
+      "esperado_alguno_de": [
+        "general.despedida_gracias"
+      ]
+    },
+    {
+      "mensaje": "¿eres un robot?",
+      "esperado_alguno_de": [
+        "general.eres_un_bot"
+      ]
+    },
+    {
+      "mensaje": "¿qué puedes hacer por mí?",
+      "esperado_alguno_de": [
+        "general.que_puedes_hacer"
+      ]
+    },
+    {
+      "mensaje": "quiero una indemnización por los perjuicios que me causaron",
+      "esperado_alguno_de": [
+        "general.pedir_compensacion"
+      ]
+    },
+    {
+      "mensaje": "¿cómo va mi reclamo? tengo el radicado",
+      "esperado_alguno_de": [
+        "general.consultar_radicado"
+      ]
+    },
+    {
+      "mensaje": "cuánto se demoran en contestar un reclamo?",
+      "esperado_alguno_de": [
+        "general.plazo_respuesta"
+      ]
+    },
+    {
+      "mensaje": "puedo mandar capturas del error?",
+      "esperado_alguno_de": [
+        "general.adjuntar_evidencia"
+      ]
+    },
+    {
+      "mensaje": "esto es una vergüenza, estoy furioso",
+      "esperado_alguno_de": [
+        "general.usuario_frustrado"
+      ]
+    },
+    {
+      "mensaje": "necesito una cotización para 3 puntos de venta",
+      "esperado_alguno_de": [
+        "cotizacion.solicitar"
+      ]
+    },
+    {
+      "mensaje": "la app se cierra sola cuando la abro",
+      "esperado_alguno_de": [
+        "app_movil.problema"
+      ]
+    },
+    {
+      "mensaje": "la página no carga y no puedo ingresar",
+      "esperado_alguno_de": [
+        "pagina_web.problema"
+      ]
+    },
+    {
+      "mensaje": "no me llegó el domicilio",
+      "esperado_alguno_de": [
+        "entrega.no_llego"
+      ]
+    },
+    {
+      "mensaje": "quiero cambiar la dirección de entrega",
+      "esperado_alguno_de": [
+        "entrega.modificar"
+      ]
+    },
+    {
+      "mensaje": "quisiera devolver un producto",
+      "esperado_alguno_de": [
+        "devolucion.info",
+        "devolucion.problema"
+      ]
+    },
+    {
+      "mensaje": "mi contrato dice una cosa y me cobran otra",
+      "esperado_alguno_de": [
+        "contrato.problema",
+        "cobro.problema"
+      ]
+    },
+    {
+      "mensaje": "tuve que esperar una hora en la sede y nadie me atendió",
+      "esperado_alguno_de": [
+        "punto_atencion.problema",
+        "punto_atencion.demora"
+      ]
+    },
+    {
+      "mensaje": "la promoción que vi en redes no me la aplicaron",
+      "esperado_alguno_de": [
+        "promocion.problema"
+      ]
+    },
+    {
+      "mensaje": "no me respondieron la cotización que pedí hace semanas",
+      "esperado_alguno_de": [
+        "cotizacion.problema",
+        "cotizacion.demora"
+      ]
+    },
+    {
+      "mensaje": "asdfgh",
+      "esperado_baja_confianza": true
+    },
+    {
+      "mensaje": "....",
+      "esperado_baja_confianza": true
+    },
+    {
+      "mensaje": "eh?",
+      "esperado_baja_confianza": true
+    }
+  ]
+}

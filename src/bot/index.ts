@@ -8,11 +8,15 @@ import type { SendMessageUseCase } from "../modules/conversations/application/us
 import type { AddBotReplyUseCase } from "../modules/conversations/application/use-cases/add-bot-reply.js";
 import type { HandleNonTextEventUseCase } from "../modules/conversations/application/use-cases/handle-non-text-event.js";
 import type { TransferToHumanUseCase } from "../modules/conversations/application/use-cases/transfer-to-human.js";
+import type { ConversationRepository } from "../modules/conversations/domain/repositories/conversation-repository.js";
+import type { TicketRepository } from "../modules/tickets/domain/repositories/ticket-repository.js";
 import type { UserRepository } from "../modules/users/domain/repositories/user-repository.js";
 import type { WebChatAdapter } from "../channels/infrastructure/web-chat-adapter.js";
 import type { WhatsAppAdapter } from "../channels/infrastructure/whatsapp-adapter.js";
 import type { TelegramAdapter } from "../channels/infrastructure/telegram-adapter.js";
 import type { TelegramMenuAdapter } from "../channels/infrastructure/telegram-menu-adapter.js";
+import { buildAttentionMenu } from "./domain/menu.js";
+import { HANDOFF_TIMEOUT_NOTICE } from "../shared/config/handoff-messages.js";
 import { webChatRoutes } from "../channels/presentation/web-chat-routes.js";
 import { isChannelMode, modeIncludesTelegram, modeIncludesWeb, modeIncludesWhatsapp } from "../shared/config/channel-mode.js";
 import { HandleInboundMessageUseCase } from "./application/handle-inbound-message.js";
@@ -28,6 +32,7 @@ import type { KnowledgeRepository } from "./domain/knowledge.js";
 import { PQRS_CATEGORY_PREFIX } from "./domain/menu.js";
 import type { WhatsAppSender } from "./domain/whatsapp.js";
 import { PrismaKnowledgeBaseRepository } from "./infrastructure/prisma-knowledge-repository.js";
+import type { RagService } from "../modules/rag/rag-service.js";
 import { telegramWebhookRouter } from "./presentation/telegram-webhook.js";
 import { whatsappWebhookRouter } from "./presentation/whatsapp-webhook.js";
 
@@ -40,6 +45,8 @@ export interface WireBotDeps {
   addBotReply: AddBotReplyUseCase;
   handleNonTextEvent: HandleNonTextEventUseCase;
   transferToHuman: TransferToHumanUseCase;
+  conversationRepository: ConversationRepository;
+  ticketRepository: TicketRepository;
   /** Adaptador único del canal web, compartido con el panel de asesor y el notifier. */
   webAdapter: WebChatAdapter;
   /** Adaptador único de WhatsApp (solo cuando el modo de canal lo incluye). */
@@ -57,6 +64,8 @@ export interface WireBotDeps {
   classifier?: IntentClassifierPort;
   /** Fase 5: consulta de datos de la empresa. Requerido si hay classifier. */
   dataQuery?: DataQueryPort;
+  rag?: RagService;
+  recentMessages?: (conversationId: string, limit: number) => Promise<string[]>;
 }
 
 export function wireBot(app: Express, deps: WireBotDeps): void {
@@ -98,14 +107,89 @@ export function wireBot(app: Express, deps: WireBotDeps): void {
       recordBotReply: (conversationId, content) => deps.addBotReply.execute(conversationId, content),
       handleNonTextEvent: (input) => deps.handleNonTextEvent.execute(input),
       transferToHuman: (input) => deps.transferToHuman.execute(input),
+      handoff: {
+        findActiveTicketCreatedAt: async (conversationId) =>
+          (await deps.ticketRepository.findOpenByConversationId(conversationId))?.createdAt ?? null,
+        hasReminder: async (conversationId, since, reminder) =>
+          (await deps.conversationRepository.listMessages(conversationId, { limit: 100 })).some(
+            (message) => message.senderType === "BOT" && message.content === reminder && message.createdAt >= since,
+          ),
+        hasAgentMessage: (conversationId) => deps.conversationRepository.hasAgentMessage(conversationId),
+        sendReminder: async (conversationId, reminder) => {
+          await deps.conversationRepository.addMessage({ conversationId, senderType: "BOT", content: reminder });
+        },
+        cancel: async (conversationId) => {
+          const ticket = await deps.ticketRepository.findOpenByConversationId(conversationId);
+          if (ticket) await deps.ticketRepository.updateStatus(ticket.id, "CLOSED");
+          await deps.conversationRepository.update(conversationId, { status: "BOT_HANDLING", assignedAgentId: null });
+          await deps.conversationRepository.addMessage({
+            conversationId,
+            senderType: "SYSTEM",
+            content: "Transferencia cancelada; conversación devuelta al bot.",
+            metadata: { eventType: "RETURNED_TO_BOT" },
+          });
+        },
+      },
     },
     knowledge: knowledgeRepository,
     pqrsKnowledge,
+    rag: deps.rag,
+    ragEnabled: deps.env.ragEnabled,
+    ragMinScore: deps.env.ragMinScore,
+    recentMessages: deps.recentMessages,
     transferAfterMisses: deps.env.transferAfterMisses,
+    handoffTimeoutMinutes: deps.env.handoffTimeoutMinutes,
+    handoffWaitMessage: deps.env.handoffWaitMessage,
     identity: deps.identity,
     classifier: deps.classifier,
     dataQuery: deps.dataQuery,
   });
+
+  let expiryCheckRunning = false;
+  const expireHandoffs = async (): Promise<void> => {
+    if (expiryCheckRunning) return;
+    expiryCheckRunning = true;
+    try {
+      const waiting = await deps.conversationRepository.findWaitingForAgent();
+      const expiryMs = deps.env.handoffTimeoutMinutes * 60_000;
+      for (const conversation of waiting) {
+        const ticket = await deps.ticketRepository.findOpenByConversationId(conversation.id);
+        if (!ticket || Date.now() - ticket.createdAt.getTime() < expiryMs) continue;
+        if (await deps.conversationRepository.hasAgentMessage(conversation.id)) continue;
+        await deps.ticketRepository.updateStatus(ticket.id, "CLOSED");
+        await deps.conversationRepository.update(conversation.id, { status: "BOT_HANDLING", assignedAgentId: null });
+        await deps.conversationRepository.addMessage({
+          conversationId: conversation.id,
+          senderType: "SYSTEM",
+          content: "Transferencia vencida; conversación devuelta al bot.",
+          metadata: { eventType: "RETURNED_TO_BOT" },
+        });
+        const notice = HANDOFF_TIMEOUT_NOTICE;
+        await deps.addBotReply.execute(conversation.id, `${notice}\n\n${buildAttentionMenu().text}`);
+        const user = await deps.userRepository.findById(conversation.userId);
+        const contactId = user?.phone;
+        if (!contactId) continue;
+        if (conversation.channel === "TELEGRAM" && deps.telegramMenuAdapter) {
+          const menu = buildAttentionMenu();
+          await deps.telegramMenuAdapter.sendMenu(contactId, {
+            text: `${notice}\n\n${menu.text}`,
+            buttons: menu.buttons,
+          });
+        } else if (conversation.channel === "WEB") {
+          await deps.webAdapter.send(contactId, { text: `${notice}\n\n${buildAttentionMenu().text}`, sender: "BOT" });
+        } else if (conversation.channel === "WHATSAPP" && deps.whatsappAdapter) {
+          await deps.whatsappAdapter.send(contactId, { text: `${notice}\n\n${buildAttentionMenu().text}`, sender: "BOT" });
+        } else if (conversation.channel === "TELEGRAM" && deps.telegramAdapter) {
+          await deps.telegramAdapter.send(contactId, { text: `${notice}\n\n${buildAttentionMenu().text}`, sender: "BOT" });
+        }
+      }
+    } finally {
+      expiryCheckRunning = false;
+    }
+  };
+  const handoffExpiryTimer = setInterval(() => { void expireHandoffs().catch(() => undefined); }, 60_000);
+  handoffExpiryTimer.unref();
+  void expireHandoffs().catch(() => undefined);
 
   const notifier = buildAgentNotifier({
     sender: deps.sender,

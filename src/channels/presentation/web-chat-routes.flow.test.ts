@@ -97,7 +97,7 @@ describe("web chat flujo WAITING_AGENT", () => {
       expect(get0.status).toBe(200);
       const j0 = (await get0.json()) as { messages: Array<{ id: number; text: string }>; nextCursor: number };
       expect(j0.messages.length).toBe(1);
-      expect(j0.messages[0]!.text).toContain("orden de llegada");
+      expect(j0.messages[0]!.text).toMatch(/Un momento.*volver al menú/s);
       const get1 = await fetch(`${base}/messages?phone=570000000001&afterId=${j0.messages[0]!.id}`);
       expect(get1.status).toBe(200);
       const j1 = (await get1.json()) as { messages: Array<{ id: number; text: string }>; nextCursor: number };

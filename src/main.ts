@@ -2,6 +2,7 @@ import { createApp } from "./app.js";
 import { bootstrapAdmin } from "./shared/application/bootstrap-admin.js";
 import { Argon2PasswordHasher } from "./shared/infrastructure/argon2-password-hasher.js";
 import { env } from "./shared/config/env.js";
+import { enforceCloudflareEmbeddingPolicy } from "./shared/config/cloudflare-embedding-policy.js";
 import { isChannelMode, modeIncludesTelegram, modeIncludesWeb, modeIncludesWhatsapp } from "./shared/config/channel-mode.js";
 import { validateConfig } from "./shared/config/validate.js";
 import { databaseConfigured, prisma } from "./shared/infrastructure/prisma.js";
@@ -40,6 +41,9 @@ import { getCustomerBalanceTool } from "./modules/chatbot/tools/customer-balance
 import { getOrderStatusTool } from "./modules/chatbot/tools/order-status.tool.js";
 import { getRecentOrdersTool } from "./modules/chatbot/tools/recent-orders.tool.js";
 import { createCompanyDbPool } from "./shared/infrastructure/company-database.js";
+import { CloudflareEmbeddingProvider, OllamaEmbeddingProvider } from "./modules/rag/embedding-provider.js";
+import { importKnowledgeBase } from "./modules/rag/importer.js";
+import { RagService } from "./modules/rag/rag-service.js";
 
 const mockModes = {
   whatsapp: env.whatsappAccessToken.length === 0,
@@ -183,6 +187,39 @@ const pingDatabase = async (): Promise<boolean> => {
   return true;
 };
 
+const ragEnabled = env.ragEnabled && databaseConfigured;
+if (env.ragEnabled && !databaseConfigured) {
+  throw new Error("RAG_ENABLED requiere DATABASE_URL configurada");
+}
+const cloudflareEmbeddingsWarning = enforceCloudflareEmbeddingPolicy({
+  nodeEnv: env.nodeEnv,
+  embeddingProvider: env.embeddingProvider,
+  embeddingsRequired: ragEnabled || env.kbImportOnStart,
+  allowCloudflareEmbeddings: env.allowCloudflareEmbeddings,
+});
+if (cloudflareEmbeddingsWarning) {
+  console.warn(JSON.stringify({ level: "warn", msg: cloudflareEmbeddingsWarning }));
+}
+if ((ragEnabled || env.kbImportOnStart) && env.embeddingProvider === "cloudflare" && (!env.cloudflareAccountId || !env.cloudflareApiToken)) {
+  throw new Error("El proveedor Cloudflare embeddings requiere CLOUDFLARE_ACCOUNT_ID y CLOUDFLARE_API_TOKEN");
+}
+const embeddingProvider = env.embeddingProvider === "cloudflare"
+  ? new CloudflareEmbeddingProvider(env.embeddingModel, env.cloudflareAccountId, env.cloudflareApiToken, env.llmTimeoutMs)
+  : new OllamaEmbeddingProvider(env.embeddingModel, env.ollamaBaseUrl, env.llmTimeoutMs);
+if (env.kbImportOnStart) {
+  if (!databaseConfigured) throw new Error("KB_IMPORT_ON_START requiere DATABASE_URL configurada");
+  const imported = await importKnowledgeBase(
+    prisma,
+    embeddingProvider,
+    new URL("../prisma/data/pqrs_base_conocimiento_v2.json", import.meta.url),
+    { companyName: env.companyName, officialChannel: env.officialChannel, conditionsUrl: env.conditionsUrl },
+  );
+  console.log(JSON.stringify({ level: "info", msg: "base de conocimiento importada al arrancar", ...imported }));
+}
+const ragService = ragEnabled
+  ? await RagService.fromDatabase(prisma, embeddingProvider, env.ragTopK, env.ragAmbiguityMargin)
+  : undefined;
+
 const app = createApp(
   (app) => {
     const authSessions = wireAuth(app, prisma, { secureCookies: env.nodeEnv === "production" });
@@ -238,6 +275,8 @@ const app = createApp(
       addBotReply,
       handleNonTextEvent,
       transferToHuman,
+      conversationRepository,
+      ticketRepository: tickets.repository,
       webAdapter,
       whatsappAdapter,
       telegramAdapter,
@@ -247,6 +286,9 @@ const app = createApp(
       identity: identity.chatIdentity,
       classifier: phase5?.classifier,
       dataQuery: phase5?.dataQuery,
+      rag: ragService,
+      recentMessages: async (conversationId, limit) =>
+        (await conversationRepository.listMessages(conversationId, { limit })).map((message) => message.content),
     });
   },
   { pingDatabase: databaseConfigured ? pingDatabase : undefined },

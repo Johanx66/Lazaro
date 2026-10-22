@@ -45,6 +45,9 @@ interface Options {
 function makeApp(send: ReturnType<typeof vi.fn>, options: Options = {}) {
   const conversation = makeConversation({ channel: options.channel ?? "WEB" });
   const sentMessages: unknown[] = [];
+  const update = vi.fn(async (id: string, data: Parameters<ConversationRepository["update"]>[1]) =>
+    id === conversation.id ? { ...conversation, ...data } : null,
+  );
 
   const conversationRepository: ConversationRepository = {
     create: async () => conversation,
@@ -52,7 +55,7 @@ function makeApp(send: ReturnType<typeof vi.fn>, options: Options = {}) {
     findActiveByUserIdAndChannel: async () => null,
     findWaitingForAgent: async () => [conversation],
     findClosed: async () => options.closed ?? [],
-    update: async (id, data) => (id === conversation.id ? { ...conversation, ...data } : null),
+    update,
     addMessage: async (data) => {
       sentMessages.push(data);
       return {
@@ -65,6 +68,7 @@ function makeApp(send: ReturnType<typeof vi.fn>, options: Options = {}) {
       };
     },
     recordEvent: async () => undefined,
+    hasAgentMessage: async () => false,
     listMessages: async () => {
       if (!options.lastUserMessageAt) return [];
       return [
@@ -100,7 +104,7 @@ function makeApp(send: ReturnType<typeof vi.fn>, options: Options = {}) {
   });
   app.use("/api/agent/conversations", agentPanelRoutes(controller));
 
-  return { app, send, sentMessages };
+  return { app, send, sentMessages, update };
 }
 
 async function start(app: ReturnType<typeof makeApp>["app"]) {
@@ -156,7 +160,7 @@ describe("AgentPanelController", () => {
 
   it("el agente responde por el canal de origen al teléfono del cliente (sender AGENT)", async () => {
     const send = vi.fn().mockResolvedValue(undefined);
-    const { app, sentMessages } = makeApp(send, { channel: "WEB" });
+    const { app, sentMessages, update } = makeApp(send, { channel: "WEB" });
     const { server, base } = await start(app);
     try {
       const res = await fetch(`${base}/c1/reply`, {
@@ -169,6 +173,7 @@ describe("AgentPanelController", () => {
       expect(sentMessages).toContainEqual(
         expect.objectContaining({ senderType: "AGENT", content: "Ya quedó resuelto" }),
       );
+      expect(update).not.toHaveBeenCalled();
     } finally {
       server.close();
     }

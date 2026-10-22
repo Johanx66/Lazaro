@@ -100,6 +100,7 @@ function makeRepository(overrides: Partial<ConversationRepository> = {}): Conver
         [...messages.values()]
           .filter((m) => m.conversationId === conversationId)
           .slice(-options.limit)),
+    hasAgentMessage: overrides.hasAgentMessage ?? (async () => false),
   };
 }
 

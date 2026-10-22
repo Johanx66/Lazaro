@@ -13,6 +13,7 @@ import type { KnowledgeRepository } from "../domain/knowledge.js";
 import type { InboundMessage } from "../../channels/domain/channel-adapter.js";
 import type { TelegramMenu } from "../../channels/domain/telegram-menu.js";
 import type { CompanyRole } from "../../modules/identity/domain/entities/company-user.js";
+import { DEFAULT_HANDOFF_WAIT_MESSAGE, HANDOFF_TIMEOUT_NOTICE } from "../../shared/config/handoff-messages.js";
 import {
   buildAttentionMenu,
   DATA_QUERY_REQUEST,
@@ -23,6 +24,8 @@ import {
   PQRS_ASK_DETAILS,
 } from "../domain/menu.js";
 import type { MenuAction } from "../domain/menu.js";
+import type { RagService } from "../../modules/rag/rag-service.js";
+import { maskLongNumbers } from "../../modules/rag/rag-service.js";
 
 export interface UserAccountPort {
   findOrCreateUser(phone: string, name: string, channel: ChatChannel): Promise<{ id: string }>;
@@ -101,6 +104,13 @@ export interface InboundConversationPorts {
     lastCustomerMessage: string;
     reason: "HUMAN_REQUEST" | "LOW_CONFIDENCE" | "MAX_MISSES";
   }): Promise<TransferToHumanResult>;
+  handoff?: {
+    findActiveTicketCreatedAt(conversationId: string): Promise<Date | null>;
+    hasAgentMessage(conversationId: string): Promise<boolean>;
+    hasReminder(conversationId: string, since: Date, reminder: string): Promise<boolean>;
+    sendReminder(conversationId: string, reminder: string): Promise<void>;
+    cancel(conversationId: string): Promise<void>;
+  };
 }
 
 export interface ProcessIncomingMessageResult {
@@ -116,6 +126,12 @@ export interface ProcessIncomingMessageResult {
 
 const DEFAULT_FALLBACK_REPLY =
   "No pude resolver tu consulta. Un agente humano te atenderá en unos instantes.";
+const HANDOFF_REMINDER = "⏳ Seguimos buscando a un asesor. Escribe «menú» o pulsa 🔙 Volver al menú para elegir otra opción.";
+
+function isReturnToMenuCommand(text: string): boolean {
+  const normalized = text.trim().toLocaleLowerCase("es").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return /^(?:\/menu|menu|volver|volver al menu|regresar|regresar al menu|otra opcion|otras opciones|cambiar de opcion|inicio|🔙 volver al menu)$/u.test(normalized);
+}
 
 // Mensaje estático OBLIGATORIO para todo contacto sin sesión vigente. Nunca se
 // genera con IA y no contiene datos sensibles (el acceso se completa en /login,
@@ -220,8 +236,14 @@ export interface ProcessIncomingMessageDeps {
    * y el mensaje se cuenta como no entendido.
    */
   pqrsKnowledge?: KnowledgeRepository;
+  rag?: RagService;
+  ragEnabled?: boolean;
+  ragMinScore?: number;
+  recentMessages?: (conversationId: string, limit: number) => Promise<string[]>;
   fallbackReply?: string;
   transferAfterMisses: number;
+  handoffTimeoutMinutes?: number;
+  handoffWaitMessage?: string;
   /** Opcional: gestión de la sesión de identidad del chat. Sin él, se ignora. */
   identity?: ChatIdentityPort;
   /** Opcional: clasificador de intenciones (Fase 5). Sin él, se usan palabras clave. */
@@ -233,16 +255,22 @@ export interface ProcessIncomingMessageDeps {
 export class ProcessIncomingMessageUseCase {
   private readonly fallbackReply: string;
   private readonly transferAfterMisses: number;
+  private readonly handoffTimeoutMinutes: number;
+  private readonly handoffWaitMessage: string;
   /**
    * Conversaciones con una búsqueda PQRS armada: el siguiente mensaje del
    * cliente se busca SOLO en los artículos de PQRS. Estado en memoria por
    * instancia (se pierde al reiniciar el proceso).
    */
   private readonly pqrsArmed = new Set<string>();
+  private readonly pendingRagConfirmations = new Map<string, string>();
+  private readonly pendingAgentOffers = new Map<string, string>();
 
   constructor(private readonly deps: ProcessIncomingMessageDeps) {
     this.fallbackReply = deps.fallbackReply ?? DEFAULT_FALLBACK_REPLY;
     this.transferAfterMisses = deps.transferAfterMisses ?? 3;
+    this.handoffTimeoutMinutes = deps.handoffTimeoutMinutes ?? 15;
+    this.handoffWaitMessage = deps.handoffWaitMessage ?? DEFAULT_HANDOFF_WAIT_MESSAGE;
   }
 
   async execute(inbound: InboundMessage): Promise<ProcessIncomingMessageResult> {
@@ -267,6 +295,31 @@ export class ProcessIncomingMessageUseCase {
       content: text,
     });
 
+    if ((sent.status === "WAITING_AGENT" || sent.status === "OPEN") && this.deps.conversations.handoff) {
+      const handoff = this.deps.conversations.handoff;
+      const startedAt = await handoff.findActiveTicketCreatedAt(conversation.id);
+      if (startedAt) {
+        const agentHasReplied = await handoff.hasAgentMessage(conversation.id);
+        if (!agentHasReplied && Date.now() - startedAt.getTime() >= this.handoffTimeoutMinutes * 60_000) {
+          await handoff.cancel(conversation.id);
+          return this.showMenu(conversation.id, channel, HANDOFF_TIMEOUT_NOTICE);
+        }
+        if (isReturnToMenuCommand(text)) {
+          await handoff.cancel(conversation.id);
+          return this.showMenu(conversation.id, channel);
+        }
+        if (agentHasReplied) {
+          return { conversationId: conversation.id, reply: null, handledByBot: false, status: sent.status };
+        }
+        const reminder = HANDOFF_REMINDER;
+        const alreadyReminded = await handoff.hasReminder(conversation.id, startedAt, reminder);
+        if (!alreadyReminded) {
+          await handoff.sendReminder(conversation.id, reminder);
+          return { conversationId: conversation.id, reply: reminder, handledByBot: true, status: sent.status };
+        }
+      }
+    }
+
     if (sent.status !== "BOT_HANDLING") {
       resetMissCount(conversation.id);
       return {
@@ -283,6 +336,19 @@ export class ProcessIncomingMessageUseCase {
     // reclamo, petición, PQRS o sugerencia no pueda saltarse la verificación.
     const gate = await this.handleUnverifiedGate(text, channel, phone, conversation.id);
     if (gate) return gate;
+
+    const offeredContext = this.pendingAgentOffers.get(conversation.id);
+    if (offeredContext) {
+      this.pendingAgentOffers.delete(conversation.id);
+      if (/^(sí|si|acepto|por favor)$/iu.test(text.trim())) {
+        return this.transfer(conversation.id, user.id, phone, name, offeredContext, "HUMAN_REQUEST");
+      }
+      if (/^no$/iu.test(text.trim())) {
+        const reply = "Entendido. Si necesitas algo más, cuéntame y te ayudo.";
+        const saved = await this.deps.conversations.recordBotReply(conversation.id, reply);
+        return { conversationId: conversation.id, reply, handledByBot: true, status: saved.status };
+      }
+    }
 
     if (isHumanRequest(text)) {
       resetMissCount(conversation.id);
@@ -307,6 +373,10 @@ export class ProcessIncomingMessageUseCase {
       name,
     );
     if (menuReply) return menuReply;
+
+    if (this.deps.ragEnabled && this.deps.rag) {
+      return this.handleWithRag(text, user.id, conversation.id, channel, phone, name);
+    }
 
     if (this.deps.classifier) {
       return this.handleWithClassifier(text, user.id, conversation.id, channel, phone, name);
@@ -405,7 +475,7 @@ export class ProcessIncomingMessageUseCase {
 
     let intent: ChatIntent;
     try {
-      ({ intent } = await classifier.classify(text));
+      ({ intent } = await classifier.classify(maskLongNumbers(text)));
     } catch {
       resetMissCount(conversationId);
       return this.transfer(conversationId, userId, phone, name, text, "LOW_CONFIDENCE");
@@ -462,11 +532,17 @@ export class ProcessIncomingMessageUseCase {
       return { conversationId, reply, handledByBot: true, status: botReply.status };
     }
 
-    const result = await dataQuery.execute(text, {
-      companyUserId: principal.companyUserId,
-      role: principal.role,
-      companyCustomerId: principal.companyCustomerId,
-    });
+    let result: { reply: string; handoffRequired?: boolean };
+    try {
+      result = await dataQuery.execute(maskLongNumbers(text), {
+        companyUserId: principal.companyUserId,
+        role: principal.role,
+        companyCustomerId: principal.companyCustomerId,
+      });
+    } catch {
+      resetMissCount(conversationId);
+      return this.transfer(conversationId, userId, phone, name, text, "LOW_CONFIDENCE");
+    }
 
     if (result.handoffRequired) {
       resetMissCount(conversationId);
@@ -485,6 +561,8 @@ export class ProcessIncomingMessageUseCase {
     phone: string,
     name: string,
     text: string,
+    fallbackReply = this.fallbackReply,
+    maxMisses = this.transferAfterMisses,
   ): Promise<ProcessIncomingMessageResult> {
     const handled = await this.deps.conversations.handleNonTextEvent({
       conversationId,
@@ -493,16 +571,27 @@ export class ProcessIncomingMessageUseCase {
 
     const missCount = incrementMissCount(conversationId);
 
-    if (missCount >= this.transferAfterMisses) {
+    if (missCount >= maxMisses) {
       return this.transfer(conversationId, userId, phone, name, text, "MAX_MISSES");
     }
 
     return {
       conversationId,
-      reply: this.fallbackReply,
+      reply: fallbackReply,
       handledByBot: false,
       status: handled.status,
     };
+  }
+
+  private registerRagMiss(
+    conversationId: string,
+    userId: string,
+    phone: string,
+    name: string,
+    text: string,
+  ): Promise<ProcessIncomingMessageResult> {
+    const message = this.deps.rag?.lowConfidenceMessage ?? this.fallbackReply;
+    return this.registerMiss(conversationId, userId, phone, name, text, message, 3);
   }
 
   /** Transfiere la conversación a un asesor humano con la razón indicada. */
@@ -524,7 +613,9 @@ export class ProcessIncomingMessageUseCase {
     });
     return {
       conversationId,
-      reply: transferred.messageToCustomer,
+      reply: transferred.status === "WAITING_AGENT" || transferred.status === "OPEN"
+        ? this.handoffWaitMessage
+        : transferred.messageToCustomer,
       handledByBot: false,
       status: transferred.status,
     };
@@ -573,6 +664,7 @@ export class ProcessIncomingMessageUseCase {
    */
   private resolveInboundText(raw: string): string {
     const action = parseMenuCallback(raw);
+    if (raw === "handoff:back") return "volver al menú";
     return action ? MENU_LABELS[action] : raw;
   }
 
@@ -592,6 +684,9 @@ export class ProcessIncomingMessageUseCase {
     phone: string,
     name: string,
   ): Promise<ProcessIncomingMessageResult | null> {
+    if (isReturnToMenuCommand(text)) {
+      return this.showMenu(conversationId, channel);
+    }
     if (channel !== "TELEGRAM") return null;
 
     if (text.trim().toLowerCase() === MENU_COMMAND) {
@@ -623,6 +718,8 @@ export class ProcessIncomingMessageUseCase {
   ): Promise<ProcessIncomingMessageResult> {
     // Elegir otra opción cancela cualquier búsqueda PQRS pendiente.
     this.pqrsArmed.delete(conversationId);
+    this.pendingRagConfirmations.delete(conversationId);
+    this.pendingAgentOffers.delete(conversationId);
 
     if (action === "pqrs") {
       this.pqrsArmed.add(conversationId);
@@ -661,15 +758,18 @@ export class ProcessIncomingMessageUseCase {
   }
 
   /** Vuelve a mostrar el menú de atención. */
-  private async showMenu(conversationId: string): Promise<ProcessIncomingMessageResult> {
+  private async showMenu(conversationId: string, channel: ChatChannel = "TELEGRAM", notice?: string): Promise<ProcessIncomingMessageResult> {
+    this.pendingRagConfirmations.delete(conversationId);
+    this.pendingAgentOffers.delete(conversationId);
     const menu = buildAttentionMenu();
-    const botReply = await this.deps.conversations.recordBotReply(conversationId, menu.text);
+    const text = notice ? `${notice}\n\n${menu.text}` : menu.text;
+    const botReply = await this.deps.conversations.recordBotReply(conversationId, text);
     return {
       conversationId,
-      reply: menu.text,
+      reply: text,
       handledByBot: true,
       status: botReply.status,
-      menu,
+    ...(channel === "TELEGRAM" ? { menu: { ...menu, text } } : {}),
     };
   }
 
@@ -685,6 +785,9 @@ export class ProcessIncomingMessageUseCase {
     phone: string,
     name: string,
   ): Promise<ProcessIncomingMessageResult> {
+    if (this.deps.ragEnabled && this.deps.rag) {
+      return this.handleWithRag(text, userId, conversationId, "TELEGRAM", phone, name);
+    }
     const pqrs = this.deps.pqrsKnowledge;
     const answer = pqrs ? await pqrs.findAnswer(text) : null;
     if (answer) {
@@ -693,5 +796,96 @@ export class ProcessIncomingMessageUseCase {
       return { conversationId, reply: answer, handledByBot: true, status: botReply.status };
     }
     return this.registerMiss(conversationId, userId, phone, name, text);
+  }
+
+  private async handleWithRag(
+    text: string,
+    userId: string,
+    conversationId: string,
+    channel: ChatChannel,
+    phone: string,
+    name: string,
+  ): Promise<ProcessIncomingMessageResult> {
+    const rag = this.deps.rag;
+    if (!rag) return this.registerMiss(conversationId, userId, phone, name, text);
+    const pendingId = this.pendingRagConfirmations.get(conversationId);
+    if (pendingId) {
+      this.pendingRagConfirmations.delete(conversationId);
+      if (/^(sí|si|correcto|eso)$/iu.test(text.trim())) {
+        const confirmed = rag.getEntry(pendingId);
+        if (confirmed) return this.replyWithRagEntry(confirmed, 1, 0, conversationId, userId, channel, phone, name, text);
+      }
+      if (/^no$/iu.test(text.trim())) return this.registerRagMiss(conversationId, userId, phone, name, text);
+    }
+    const startedAt = Date.now();
+    try {
+      let query = text;
+      if (text.trim().split(/\s+/u).filter(Boolean).length <= 3 && this.deps.recentMessages) {
+        const previous = await this.deps.recentMessages(conversationId, 6);
+        const context = previous.filter((message) => message !== text).slice(-4);
+        if (context.length > 0) query = `${context.join("\n")}\n${text}`;
+      }
+      const match = await rag.find(query);
+      const minimum = this.deps.ragMinScore ?? 0.55;
+      if (!match) {
+        console.log(JSON.stringify({ level: "info", msg: "rag_decision", decision: "aclarar", top1: 0, top2: 0, latencyMs: Date.now() - startedAt }));
+        return this.registerRagMiss(conversationId, userId, phone, name, text);
+      }
+      if (match.entry.priority === "critica") {
+        return this.replyWithRagEntry(match.entry, match.score, match.secondScore, conversationId, userId, channel, phone, name, text, startedAt);
+      }
+      if (match.score < minimum) {
+        console.log(JSON.stringify({ level: "info", msg: "rag_decision", entryId: match.entry.id, decision: "aclarar", top1: match.score, top2: match.secondScore, escalationMode: match.entry.escalationMode, latencyMs: Date.now() - startedAt }));
+        return this.registerRagMiss(conversationId, userId, phone, name, text);
+      }
+      if (match.ambiguous) {
+        const question = match.entry.confirmationQuestion ?? "¿Te refieres a este tema?";
+        this.pendingRagConfirmations.set(conversationId, match.entry.id);
+        const saved = await this.deps.conversations.recordBotReply(conversationId, question);
+        console.log(JSON.stringify({ level: "info", msg: "rag_decision", entryId: match.entry.id, top1: match.score, top2: match.secondScore, decision: "confirmar", escalationMode: match.entry.escalationMode, latencyMs: Date.now() - startedAt }));
+        return { conversationId, reply: question, handledByBot: true, status: saved.status };
+      }
+      return this.replyWithRagEntry(match.entry, match.score, match.secondScore, conversationId, userId, channel, phone, name, text, startedAt);
+    } catch {
+      console.log(JSON.stringify({ level: "info", msg: "rag_decision", decision: "aclarar", reason: "embedding_error", latencyMs: Date.now() - startedAt }));
+      return this.registerRagMiss(conversationId, userId, phone, name, text);
+    }
+  }
+
+  private async replyWithRagEntry(
+    entry: import("../../modules/rag/rag-service.js").RagEntry,
+    score: number,
+    secondScore: number,
+    conversationId: string,
+    userId: string,
+    channel: ChatChannel,
+    phone: string,
+    name: string,
+    text: string,
+    startedAt = Date.now(),
+  ): Promise<ProcessIncomingMessageResult> {
+    if (entry.tool && this.deps.dataQuery) {
+      console.log(JSON.stringify({ level: "info", msg: "rag_decision", entryId: entry.id, top1: score, top2: secondScore, decision: "herramienta", escalationMode: entry.escalationMode, latencyMs: Date.now() - startedAt }));
+      const toolRequest = entry.tool === "consulta_saldo" ? "consulta mi saldo" : "consulta mis pedidos recientes";
+      return this.handleDataQuery(toolRequest, userId, conversationId, channel, phone, name);
+    }
+    if (entry.tool) {
+      const unavailable = "No puedo consultar ese dato en este momento. Si quieres, puedo comunicarte con un asesor.";
+      this.pendingAgentOffers.set(conversationId, text);
+      const saved = await this.deps.conversations.recordBotReply(conversationId, unavailable);
+      console.log(JSON.stringify({ level: "info", msg: "rag_decision", entryId: entry.id, top1: score, top2: secondScore, decision: "herramienta_no_disponible", escalationMode: entry.escalationMode, latencyMs: Date.now() - startedAt }));
+      return { conversationId, reply: unavailable, handledByBot: true, status: saved.status };
+    }
+    const offer = entry.escalationMode === "ofrecer" ? " Si quieres, puedo comunicarte con un asesor." : "";
+    const answer = `${entry.answer}${offer}`;
+    if (entry.escalationMode === "ofrecer") this.pendingAgentOffers.set(conversationId, text);
+    resetMissCount(conversationId);
+    const saved = await this.deps.conversations.recordBotReply(conversationId, answer);
+    console.log(JSON.stringify({ level: "info", msg: "rag_decision", entryId: entry.id, top1: score, top2: secondScore, decision: entry.escalationMode === "inmediato" || entry.priority === "critica" ? "escalar" : "responder", escalationMode: entry.escalationMode, latencyMs: Date.now() - startedAt }));
+    if (entry.escalationMode === "inmediato" || entry.priority === "critica") {
+      const transferred = await this.transfer(conversationId, userId, phone, name, text, "LOW_CONFIDENCE");
+      return { ...transferred, reply: `${answer}\n\n${transferred.reply ?? "Un asesor continuará contigo."}` };
+    }
+    return { conversationId, reply: answer, handledByBot: true, status: saved.status };
   }
 }

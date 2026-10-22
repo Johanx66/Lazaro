@@ -167,7 +167,6 @@ export class AgentPanelController {
       senderType: "AGENT",
       content: text,
     });
-
     res.status(201).json({ status: "sent" });
   }
 

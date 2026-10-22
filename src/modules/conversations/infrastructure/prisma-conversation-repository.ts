@@ -104,6 +104,10 @@ export class PrismaConversationRepository implements ConversationRepository {
     return rows.reverse().map((row) => this.toDomainMessage(row));
   }
 
+  async hasAgentMessage(conversationId: string): Promise<boolean> {
+    return (await this.db.message.count({ where: { conversationId, senderType: "AGENT" } })) > 0;
+  }
+
   async findWaitingForAgent(): Promise<Conversation[]> {
     const conversations = await this.db.conversation.findMany({
       where: {

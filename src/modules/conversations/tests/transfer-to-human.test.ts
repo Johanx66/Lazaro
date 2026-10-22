@@ -88,6 +88,7 @@ function makeRepo(initial: Conversation) {
     },
     recordEvent: async (data) => void events.push(data),
     listMessages: async () => [],
+    hasAgentMessage: async () => false,
   };
   return { repo, store, events, messages };
 }

@@ -56,6 +56,7 @@ function makeApp(lastUserMessageAt?: Date) {
       };
     },
     recordEvent: async () => undefined,
+    hasAgentMessage: async () => false,
     listMessages: async () => {
       if (!lastUserMessageAt) return [];
       return [
@@ -145,6 +146,7 @@ describe("AgentPanelController con canal TELEGRAM", () => {
         }),
         recordEvent: async () => undefined,
         listMessages: async () => [],
+        hasAgentMessage: async () => false,
       },
       userRepository: {
         create: async (input) => ({ ...user, ...input }),
