@@ -84,15 +84,15 @@ CREATE TABLE IF NOT EXISTS empresa_demo.orders (
 
 -- 3. Datos ficticios (los mismos ids que COMPANY_SEED_* espera en la BD del bot).
 INSERT INTO empresa_demo.customers (id, name, current_balance, credit_limit) VALUES
-    ('usr_101', 'Juan Pérez (ficticio)',  150.50, 500.00),
-    ('usr_102', 'Maria Gómez (ficticia)',  0.00, 1000.00)
+    ('USR_101', 'Juan Pérez (ficticio)',  150.50, 500.00),
+    ('USR_102', 'Maria Gómez (ficticia)',  0.00, 1000.00)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO empresa_demo.orders (id, customer_id, status, total, created_at) VALUES
-    ('123', 'usr_101', 'EN_TRANSITO',  45.00, NOW() - INTERVAL '3 days'),
-    ('124', 'usr_101', 'ENTREGADO',   105.50, NOW() - INTERVAL '1 day'),
-    ('125', 'usr_101', 'PROCESANDO',   30.00, NOW()),
-    ('999', 'usr_102', 'PROCESANDO',  200.00, NOW() - INTERVAL '2 days')
+    ('123', 'USR_101', 'EN_TRANSITO',  45.00, NOW() - INTERVAL '3 days'),
+    ('124', 'USR_101', 'ENTREGADO',   105.50, NOW() - INTERVAL '1 day'),
+    ('125', 'USR_101', 'PROCESANDO',   30.00, NOW()),
+    ('999', 'USR_102', 'PROCESANDO',  200.00, NOW() - INTERVAL '2 days')
 ON CONFLICT (id) DO NOTHING;
 
 -- 4. Vistas con el contrato exacto que consumen las herramientas del bot.
@@ -182,7 +182,7 @@ SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'readon
 --   1) Crear el usuario en el panel: username, displayName, role=USER,
 --      registeredPhone (coincidir con REQUIRE_PHONE_MATCH/Telegram según el caso).
 --   2) En la BD del bot (Postgres de la app), igualar su id al de la demo:
---      UPDATE company_users SET id = 'usr_101' WHERE username = '<username>';
+--      UPDATE company_users SET id = 'USR_101' WHERE username = '<username>';
 --   El FK chat_sessions.companyUserId tiene ON UPDATE CASCADE (migración 0004).
 --
--- Con usr_101 se ven pedidos 123,124,125 y saldo 150.50/500.00.
+-- Con USR_101 se ven pedidos 123,124,125 y saldo 150.50/500.00.

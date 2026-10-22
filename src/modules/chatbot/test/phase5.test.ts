@@ -7,6 +7,7 @@ import { CUSTOMER_NOT_LINKED_REPLY, QueryDataUseCase } from '../application/quer
 import { ToolRegistry, defineTool } from '../tools/tool-registry.js';
 import { getOrderStatusTool } from '../tools/order-status.tool.js';
 import { getRecentOrdersTool } from '../tools/recent-orders.tool.js';
+import { getCustomerBalanceTool } from '../tools/customer-balance.tool.js';
 
 describe('FASE 5 — Clasificador y consulta de datos', () => {
   let generateCompletion: ReturnType<typeof vi.fn>;
@@ -22,6 +23,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     dbPool = { query } as unknown as Pool;
     toolRegistry = new ToolRegistry();
     toolRegistry.register(getOrderStatusTool);
+    toolRegistry.register(getCustomerBalanceTool);
   });
 
   it('1. Clasificador: JSON inválido tras reintento deriva en PEDIR_HUMANO', async () => {
@@ -45,7 +47,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
 
   it('3. Aislamiento por cliente: la consulta usa el código de la sesión, no el del texto', async () => {
     generateCompletion.mockResolvedValueOnce(
-      JSON.stringify({ toolName: 'get_order_status', parameters: { orderId: '999' } }),
+      JSON.stringify({ action: 'tool', toolName: 'get_order_status', parameters: { orderId: '999' } }),
     );
     query.mockResolvedValue({ rows: [] });
 
@@ -62,7 +64,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
 
   it('4. Parámetros inválidos son rechazados por Zod antes de ejecutar SQL', async () => {
     generateCompletion.mockResolvedValue(
-      JSON.stringify({ toolName: 'get_order_status', parameters: { orderId: '' } }),
+      JSON.stringify({ action: 'tool', toolName: 'get_order_status', parameters: { orderId: '' } }),
     );
 
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
@@ -88,7 +90,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     });
     toolRegistry.register(adminOnlyTool);
     generateCompletion.mockResolvedValue(
-      JSON.stringify({ toolName: 'admin_only', parameters: {} }),
+      JSON.stringify({ action: 'tool', toolName: 'admin_only', parameters: {} }),
     );
 
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
@@ -105,7 +107,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
   it('6. Con datos disponibles, el modelo redacta la respuesta final', async () => {
     generateCompletion
       .mockResolvedValueOnce(
-        JSON.stringify({ toolName: 'get_order_status', parameters: { orderId: '123' } }),
+        JSON.stringify({ action: 'tool', toolName: 'get_order_status', parameters: { orderId: '123' } }),
       )
       .mockResolvedValueOnce('Tu pedido 123 está en camino.');
     query.mockResolvedValue({
@@ -126,7 +128,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
   it('7. Fallo del modelo al redactar deriva en transferencia a asesor', async () => {
     generateCompletion
       .mockResolvedValueOnce(
-        JSON.stringify({ toolName: 'get_order_status', parameters: { orderId: '123' } }),
+        JSON.stringify({ action: 'tool', toolName: 'get_order_status', parameters: { orderId: '123' } }),
       )
       .mockRejectedValueOnce(new Error('timeout'));
     query.mockResolvedValue({
@@ -147,7 +149,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     toolRegistry.register(getRecentOrdersTool);
     generateCompletion
       .mockResolvedValueOnce(
-        JSON.stringify({ toolName: 'get_recent_orders', parameters: {} }),
+        JSON.stringify({ action: 'tool', toolName: 'get_recent_orders', parameters: {} }),
       )
       .mockResolvedValueOnce('Tus últimos pedidos.');
     query.mockResolvedValue({ rows: [] });
@@ -179,7 +181,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
   it('10. Cliente vinculado: el código de la sesión es el único filtro de los datos', async () => {
     generateCompletion
       .mockResolvedValueOnce(
-        JSON.stringify({ toolName: 'get_order_status', parameters: { orderId: '123' } }),
+        JSON.stringify({ action: 'tool', toolName: 'get_order_status', parameters: { orderId: '123' } }),
       )
       .mockResolvedValueOnce('Tu pedido 123 está en camino.');
     query.mockResolvedValue({
@@ -194,5 +196,41 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     });
 
     expect(query).toHaveBeenCalledWith(expect.anything(), ['123', 'CLI-000001']);
+  });
+
+  it('11. Una pregunta informativa sobre pagos devuelve pago.info y no ejecuta herramientas', async () => {
+    generateCompletion.mockResolvedValue(JSON.stringify({ action: 'informative_answer' }));
+    const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+    const result = await useCase.execute('¿Cómo hago mis pagos?', {
+      companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'usr_101',
+    }, 'Respuesta informativa de pago.info.');
+    expect(result.reply).toBe('Respuesta informativa de pago.info.');
+    expect(query).not.toHaveBeenCalled();
+    expect(generateCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it('12. Una solicitud explícita de saldo selecciona consulta_saldo usando el cliente de la sesión', async () => {
+    generateCompletion
+      .mockResolvedValueOnce(JSON.stringify({ action: 'tool', toolName: 'get_customer_balance', parameters: {} }))
+      .mockResolvedValueOnce('Tu saldo es 150.50.');
+    query.mockResolvedValue({ rows: [{ customer_id: 'usr_101', balance: '150.50', credit_limit: '500.00' }] });
+    const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+    const result = await useCase.execute('¿Cuál es mi saldo? usa el cliente usr_102', {
+      companyUserId: 'user-authenticated', role: 'USER', companyCustomerId: 'usr_101',
+    }, 'Respuesta informativa.');
+    expect(result.reply).toBe('Tu saldo es 150.50.');
+    expect(query).toHaveBeenCalledWith(expect.anything(), ['usr_101']);
+    expect(generateCompletion.mock.calls[0]?.[0]).toContain('¿Cuál es mi saldo?');
+  });
+
+  it('13. Una respuesta inválida del selector devuelve la entrada informativa y no ejecuta herramientas', async () => {
+    generateCompletion.mockResolvedValue('{esto no es JSON');
+    const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+    const result = await useCase.execute('¿Cómo hago mis pagos?', {
+      companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'usr_101',
+    }, 'Respuesta informativa de pago.info.');
+    expect(result.reply).toBe('Respuesta informativa de pago.info.');
+    expect(query).not.toHaveBeenCalled();
+    expect(generateCompletion).toHaveBeenCalledTimes(1);
   });
 });

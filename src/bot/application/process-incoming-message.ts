@@ -59,6 +59,7 @@ export interface DataQueryPort {
   execute(
     text: string,
     session: { companyUserId: string; role: CompanyRole; companyCustomerId: string | null },
+    fallbackAnswer?: string,
   ): Promise<{ reply: string; handoffRequired?: boolean }>;
 }
 
@@ -519,6 +520,7 @@ export class ProcessIncomingMessageUseCase {
     channel: ChatChannel,
     phone: string,
     name: string,
+    fallbackAnswer?: string,
   ): Promise<ProcessIncomingMessageResult> {
     const { identity, dataQuery } = this.deps;
     if (!dataQuery) {
@@ -543,11 +545,14 @@ export class ProcessIncomingMessageUseCase {
 
     let result: { reply: string; handoffRequired?: boolean };
     try {
-      result = await dataQuery.execute(maskLongNumbers(text), {
+      const session = {
         companyUserId: principal.companyUserId,
         role: principal.role,
         companyCustomerId: principal.companyCustomerId,
-      });
+      };
+      result = fallbackAnswer === undefined
+        ? await dataQuery.execute(maskLongNumbers(text), session)
+        : await dataQuery.execute(maskLongNumbers(text), session, fallbackAnswer);
     } catch {
       resetMissCount(conversationId);
       return this.transfer(conversationId, userId, phone, name, text, "LOW_CONFIDENCE");
@@ -875,8 +880,10 @@ export class ProcessIncomingMessageUseCase {
   ): Promise<ProcessIncomingMessageResult> {
     if (entry.tool && this.deps.dataQuery) {
       console.log(JSON.stringify({ level: "info", msg: "rag_decision", entryId: entry.id, top1: score, top2: secondScore, decision: "herramienta", escalationMode: entry.escalationMode, latencyMs: Date.now() - startedAt }));
-      const toolRequest = entry.tool === "consulta_saldo" ? "consulta mi saldo" : "consulta mis pedidos recientes";
-      return this.handleDataQuery(toolRequest, userId, conversationId, channel, phone, name);
+      const informativeEntry = entry.topic === "pago"
+        ? this.deps.rag?.getEntry("pago.info") ?? entry
+        : entry;
+      return this.handleDataQuery(text, userId, conversationId, channel, phone, name, informativeEntry.answer);
     }
     if (entry.tool) {
       resetMissCount(conversationId);
