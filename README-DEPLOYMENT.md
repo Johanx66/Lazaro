@@ -82,101 +82,43 @@ contraseña del usuario de solo lectura como variable (no queda escrita en el ar
 Los datos de prueba se cargan con `scripts/seed-company-db.sql`. El usuario debe tener permisos
 únicamente de SELECT sobre las vistas; nunca escritura.
 
+## Render: Telegram + FAQ
 
-4. Configuración del Proxy Inverso con Nginx y SSL
+Para desplegar en Render solo con **Telegram + FAQ** (sin Ollama ni `COMPANY_DATABASE_URL`), usa el Blueprint `render.yaml` de la raíz.
 
-Instalar Nginx y Certbot en el servidor anfitrión:
+### Pasos con Blueprint
+1. Conecta el repositorio a Render (Blueprint).
+2. Render creará el web service (`chatbot-soporte-backend`) con `runtime: docker` usando el `Dockerfile` existente y la base de datos Postgres (`chatbot-db`) con plan `free`.
+3. Rellena las variables con `sync: false` en el panel de Render:
+   - `TELEGRAM_BOT_TOKEN` (obligatorio)
+   - `TELEGRAM_WEBHOOK_SECRET` (obligatorio, solo `[A-Za-z0-9_-]`, 1-256; debe coincidir con `secret_token` de `setWebhook`)
+   - `PUBLIC_BASE_URL` (obligatorio, `https://<dominio-render>`)
+   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` (opcionales; si se definen y no existe ningún ADMIN, se crea al arrancar con contraseña con hash)
 
-sudo apt update
-sudo apt install -y nginx certbot python3-certbot-nginx
+### Variables fijas en el Blueprint
+- `CHANNEL_MODE=telegram`
+- `TRUST_PROXY=true`
+- `TELEGRAM_SKIP_PHONE_MATCH=true`
+- `DATABASE_URL` se toma de la base de datos de Render mediante `fromDatabase` (connectionString interna)
 
+### Healthcheck
+Configura/usa el healthcheck en Render con ruta `/api/health` (público, sin sesión).
 
-Crear el archivo de configuración para la aplicación:
+### Registrar el webhook
+Usa `scripts/set-telegram-webhook.ps1` en PowerShell (lee `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` y `PUBLIC_BASE_URL` de las variables de entorno de la sesión, **nunca** de `.env`). El script llama a `setWebhook` con `url=<PUBLIC_BASE_URL>/webhooks/telegram` y `secret_token`, y luego a `getWebhookInfo`. No imprime el token ni el secreto.
 
-sudo nano /etc/nginx/sites-available/chatbot
+Ejemplo (PowerShell):
+```powershell
+$env:TELEGRAM_BOT_TOKEN="<token>"
+$env:TELEGRAM_WEBHOOK_SECRET="<secreto>"
+$env:PUBLIC_BASE_URL="https://<dominio-render>"
+.\scripts\set-telegram-webhook.ps1
+```
 
+### Limitación plan free (Render)
+- **Web service:** se **duerme tras 15 minutos sin tráfico**. Al llegar un webhook o mensaje, arranca de nuevo (aprox. 1 minuto), por lo que el **primer mensaje puede tardar** en recibir respuesta. Cada workspace tiene 750 horas de instancia free al mes; un servicio dormido no las consume.
+- **Postgres free:** solo se permite **una** base free por workspace, con **1 GB** y **sin backups**. **Caduca a los 30 días** de su creación; después hay 14 días de gracia y luego Render la **borra con todos los datos**. No usarla con datos reales sin subir de plan.
+- **Primer despliegue:** el contenedor ejecuta `prisma migrate deploy` al arrancar. Si el primer deploy falla porque la base aún no estaba lista, usa **Manual Deploy → Deploy latest commit** cuando el estado de la base sea *Available*.
 
-Pegar la siguiente configuración (reemplazando chatbot.empresa.com por tu dominio real):
+> Nota: todos los valores mostrados son de ejemplo.
 
-server {
-    listen 80;
-    server_name chatbot.empresa.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-
-
-Habilitar el sitio y reiniciar Nginx:
-
-sudo ln -s /etc/nginx/sites-available/chatbot /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
-
-
-Generar certificado SSL con Let's Encrypt:
-
-sudo certbot --nginx -d chatbot.empresa.com
-
-
-5. Automatización de Respaldos de Base de Datos
-
-Asignar permisos de ejecución al script de respaldo:
-
-chmod +x scripts/backup-db.sh
-
-
-Configurar una tarea programada (cron) para ejecutar el respaldo diariamente a las 2:00 AM:
-
-crontab -e
-
-
-Añadir la siguiente línea al final del archivo:
-
-0 2 * * * /var/www/chatbot/scripts/backup-db.sh >> /var/log/chatbot-backup.log 2>&1
-
-
-6. Monitoreo y Mantenimiento
-
-Ver logs de la aplicación en tiempo real:
-
-docker logs -f chatbot_app
-
-
-Ver logs de la IA (Ollama):
-
-docker logs -f chatbot_ollama
-
-
-Reiniciar servicios:
-
-docker compose restart
-
-
-Rotación de logs de Docker
-
-Los contenedores escriben logs en el host; configura su rotación en /etc/docker/daemon.json:
-
-{
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "10m", "max-file": "5" }
-}
-
-Luego reinicia Docker: sudo systemctl restart docker (recrea los contenedores con
-docker compose up -d para aplicar la política).
-
-Nota sobre proxy y rate-limit
-
-Nginx reenvía X-Forwarded-For (ver sección 4). Para que el rate-limit use la IP real del cliente
-y no la del proxy, define en `.env`:
-
-  TRUST_PROXY=true

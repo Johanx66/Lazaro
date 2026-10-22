@@ -20,6 +20,7 @@ Reglas: ver `AGENTS.md`. Se trabaja UNA fase a la vez.
 | 7 | WhatsApp real | **pendiente** |
 | 8 | Canal Telegram (webhook de la Bot API) | **COMPLETADA** |
 | 9 | Puerta de verificación obligatoria (todo contacto sin sesión recibe el mensaje estático y el enlace; cero IA) | **EN CURSO** — puerta y revocación por cambio de teléfono implementadas; revisión de permisos hecha. El mapeo `customer_id` está DECIDIDO e implementado (columna `company_users.companyCustomerId` + scripts de la BD de prueba de Lázaro Software). Quedan 3 decisiones funcionales del dueño (rol ADMIN en el chat, PQRS en el chat, configuración de Telegram) |
+| 10 | Despliegue en Render (Blueprint) | **EN CURSO** — `render.yaml`, script de webhook y docs listos; falta desplegar en Render y probar |
 
 Nota: todavía no hay número de WhatsApp. Todo se desarrolla y prueba con el chat web
 simulado. WhatsApp se conecta al final como un adaptador más.
@@ -352,3 +353,88 @@ obligatoria"):
 **Criterio:** ningún mensaje de un contacto sin verificar genera llamadas a la IA, en
 ningún canal, y el enlace se entrega una sola vez mientras siga vigente. La fase
 **no se cierra** hasta que se decida lo anterior.
+
+## FASE 10 — Recuperar despliegue (Telegram) (Railway)
+
+Contexto: el servicio en Railway está caído. El canal real es Telegram (no Meta);
+la Fase 7 (WhatsApp) sigue pendiente y no aplica.
+
+Decisión: en este despliegue se usa **TELEGRAM_SKIP_PHONE_MATCH=true** (vinculación
+en "enlace + credenciales"; el chat.id de Telegram no se trata como teléfono).
+
+Hecho:
+1. Revisión de PLAN.md, AUDIT.md, AGENTS.md, INSTALACION-EMPRESA.md y
+   README-DEPLOYMENT.md. Conclusiones:
+   - Con CHANNEL_MODE=telegram no se necesitan variables WHATSAPP_*.
+   - Ollama no es práctico en Railway; sin COMPANY_DATABASE_URL el bot responde
+     por FAQ y transfiere a asesor.
+   - Hay inconsistencia de versión de Node (AGENTS.md: 20+, AUDIT.md: 24).
+2. [OpenCode] Robustez de configuración (hecho): TRUST_PROXY/REQUIRE_PHONE_MATCH/
+   TELEGRAM_SKIP_PHONE_MATCH alineados con `env.ts` (`true/false/1/0`), `PORT` vacío
+   tratado como no definido (3000) y tests vitest.
+3. [OpenCode] Versión de Node (hecho): Node 20 real (imagen Docker), coherente con
+   `package.json` y `AGENTS.md`.
+4. [OpenCode] Documentación (hecha en su momento): sección Railway en
+   `README-DEPLOYMENT.md` y AUDIT.md.
+
+Pendiente (no retomado en esta fase):
+1. [Manual] Revisar en Railway el estado del último deploy y sus logs.
+2. [Manual] Verificar variables: PUBLIC_BASE_URL, TRUST_PROXY=true,
+   CHANNEL_MODE=telegram, DATABASE_URL, ADMIN_*, TELEGRAM_* (con TELEGRAM_SKIP_PHONE_MATCH=true).
+3. [Manual] Si cambió el dominio: volver a registrar el webhook (setWebhook con el
+   mismo secret_token) y comprobar getWebhookInfo.
+4. Prueba: mensaje al bot por Telegram → respuesta y conversación visible en el panel.
+
+Nota: el despliegue en Railway no se retomó. Se pasa a **Render** (siguiente sección).
+
+Criterio: el bot responde por Telegram en el entorno desplegado, sin secretos en
+el repositorio ni en los logs. Salida literal de `npm run typecheck` y `npm test`
+al cerrar la fase.
+
+## FASE 10 — Despliegue en Render (Blueprint) (EN CURSO)
+
+Contexto: modo **Telegram + FAQ**, sin Ollama ni `COMPANY_DATABASE_URL`. Se despliega
+en Render con Docker + Postgres de Render (`plan: free`). Las cuentas, los secretos y
+los comandos contra Render/Telegram los gestiona el dueño; OpenCode solo prepara los
+archivos. Se mantiene la decisión **TELEGRAM_SKIP_PHONE_MATCH=true** (vinculación
+"enlace + credenciales"; el `chat.id` de Telegram no se trata como teléfono).
+
+Hecho:
+1. **`render.yaml`** (nuevo; primera línea `# yaml-language-server: $schema=...`):
+   - Web service `chatbot-soporte-backend`: `runtime: docker` con el `Dockerfile`
+     existente (sin cambios), `region: oregon`, `plan: free`,
+     `healthCheckPath: /api/health`, `autoDeploy: false`.
+   - Base Postgres de Render `chatbot-db` (`region: oregon`, `plan: free`) y
+     `DATABASE_URL` vía `fromDatabase` con `property: connectionString` (interna).
+   - Valores fijos: `CHANNEL_MODE=telegram`, `TRUST_PROXY="true"`,
+     `TELEGRAM_SKIP_PHONE_MATCH="true"` (entrecomillados: el schema solo admite
+     string o número en `value`).
+   - `sync: false`: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
+     `PUBLIC_BASE_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
+   - No define `WHATSAPP_*`, `OLLAMA_*`, `LLM_*`, `CLOUDFLARE_*`, `COMPANY_*` ni
+     `PORT` (Render lo inyecta). Ningún valor real.
+2. **`scripts/set-telegram-webhook.ps1`** (nuevo): lee `TELEGRAM_BOT_TOKEN`,
+   `TELEGRAM_WEBHOOK_SECRET` y `PUBLIC_BASE_URL` de las variables de entorno de la
+   sesión (nunca de `.env`); valida formato; llama a `setWebhook` con
+   `url=<PUBLIC_BASE_URL>/webhooks/telegram` y `secret_token`, y luego a
+   `getWebhookInfo`. No imprime token ni secreto (los errores muestran solo el
+   estado HTTP). No se ejecuta en esta sesión.
+3. **`README-DEPLOYMENT.md`**: sección **"Render: Telegram + FAQ"** (pasos del
+   Blueprint, variables del panel, healthcheck `/api/health`, uso del script y
+   limitaciones del plan free).
+4. **`AUDIT.md`**: secciones Fase 10 (Railway, histórica) y Fase 10 (Render).
+
+Pendiente (en orden):
+1. [Manual] Crear el Blueprint en Render desde el repositorio y rellenar las
+   variables `sync: false` en el panel.
+2. [Manual] Registrar el webhook con `scripts/set-telegram-webhook.ps1` y comprobar
+   `getWebhookInfo`.
+3. [Manual] Probar: mensaje al bot por Telegram → respuesta y conversación visible
+   en el panel.
+4. [Manual/Riesgo] El Postgres free de Render caduca a los 30 días (solo uno por
+   workspace); decidir si se mantiene free o se sube de plan antes de usarlo de
+   verdad.
+
+Criterio: el bot responde por Telegram desde Render, con el healthcheck
+`/api/health` en verde y sin secretos en el repositorio ni en los logs. La fase no
+se cierra hasta completar el despliegue y la prueba manual.

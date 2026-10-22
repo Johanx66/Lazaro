@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+
+services:
+  - type: web
+    name: chatbot-soporte-backend
+    runtime: docker
+    region: oregon
+    plan: free
+    autoDeploy: false
+    healthCheckPath: /api/health
+    envVars:
+      - key: CHANNEL_MODE
+        value: telegram
+      - key: TRUST_PROXY
+        value: "true"
+      - key: TELEGRAM_SKIP_PHONE_MATCH
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: chatbot-db
+          property: connectionString
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+
+databases:
+  - name: chatbot-db
+    region: oregon
+    plan: free

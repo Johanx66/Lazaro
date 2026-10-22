@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "read": { ".env": "deny", ".env.*": "deny", "*.example": "allow" },
+    "bash": {
+      "*": "ask",
+      "git status": "allow",
+      "git diff*": "allow",
+      "npm run typecheck": "allow",
+      "npm test*": "allow",
+      "git push*": "deny",
+      "railway*": "ask",
+      "grep*": "allow",
+      "find": "allow",
+        "ls": "allow"      
+    }
+  }
+}

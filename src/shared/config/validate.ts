@@ -53,7 +53,7 @@ function parsePositiveInt(value: string | undefined): { ok: boolean; value: numb
 
 function parsePort(value: string | undefined): { ok: boolean; raw: string } {
   const raw = value ?? "";
-  if (!value || !value.trim()) return { ok: true, raw };
+  if (value === undefined || !value.trim()) return { ok: true, raw };
   const n = Number(value);
   return Number.isInteger(n) && n >= 1 && n <= 65535 ? { ok: true, raw } : { ok: false, raw };
 }
@@ -73,7 +73,10 @@ function parseBooleanEnv(value: string | undefined): { ok: boolean; raw: string 
   const raw = value ?? "";
   if (!value || !value.trim()) return { ok: true, raw };
   const normalized = value.trim().toLowerCase();
-  return normalized === "true" || normalized === "false" ? { ok: true, raw } : { ok: false, raw };
+  if (normalized === "true" || normalized === "false" || normalized === "1" || normalized === "0") {
+    return { ok: true, raw };
+  }
+  return { ok: false, raw };
 }
 
 function isValidRegExp(pattern: string): boolean {

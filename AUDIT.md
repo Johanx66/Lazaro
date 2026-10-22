@@ -541,13 +541,10 @@ npm notice run vitest run
  RUN  v5.0.1 C:/Users/Wilso/Downloads/todo menos ultima fase (en teoria)/prueba/Chatbot-Juan/Chatbot-main
 
 
- Test Files  46 passed (46)
-      Tests  391 passed (391)
-   Start at  13:38:47
-   Duration  24.06s (tests 72%, import 18%, transform 8%, worker 1%)
-
-    Isolate  46 workers spawned · ~480ms startup each (spawn + environment, per file)
-             at least ~6.88s faster with isolate: false — reuses workers across files instead of one per file
+ Test Files  47 passed (47)
+      Tests  397 passed (397)
+   Start at  23:04:30
+   Duration  29.95s (tests 76%, import 15%, transform 8%, worker 1%)
 ```
 
 Tests nuevos: `telegram-adapter.test.ts`, `telegram-webhook.test.ts`,
@@ -614,6 +611,53 @@ npm notice run vitest run
 Tests nuevos: `src/shared/application/bootstrap-admin.test.ts` (6 casos: faltan var,
 contraseña débil, ya existe admin, creación con hash/rol, email en minúsculas, no filtra
 contraseña).
+
+## FASE 10 — Recuperar despliegue (Telegram) (Railway)
+
+### Qué se hizo
+1. **PLAN.md**: se añadió **Fase 10 — Recuperar despliegue (Telegram)** como **ACTUAL** (Fase 9 sigue **EN CURSO**). Se registró la decisión: **TELEGRAM_SKIP_PHONE_MATCH=true** en este despliegue (vinculación "enlace + credenciales").
+2. **Robustez de configuración** (`src/shared/config/validate.ts`):
+   - `parseBooleanEnv` ahora acepta `true/false/1/0` (alineado con lo que interpreta `env.ts`).
+   - `parsePort` trata `PORT` vacío como no definido (usa por defecto 3000); un `PORT` no numérico o fuera de rango sigue fallando.
+   - Nuevos tests vitest: `src/shared/config/config-validation-railway.test.ts` (TRUST_PROXY/REQUIRE_PHONE_MATCH/TELEGRAM_SKIP_PHONE_MATCH con `1/0`, PORT vacío y PORT inválido).
+3. **Versión de Node**: comparativa — `Dockerfile` usa `node:20-alpine` (builder/runner), `package.json` `engines.node >=20`, `AGENTS.md` indica "Node.js 20+", `AUDIT.md` menciona "Node.js 24 + ..." en la cabecera (texto descriptivo). Versión real aplicada: **Node 20** (imagen Docker). No se cambia la imagen base ni `AGENTS.md`.
+4. **Documentación**: `README-DEPLOYMENT.md` añade sección **"Railway: Telegram + FAQ"** (set mínimo, trampas, Healthcheck Path `/api/health`, registro de webhook con `setWebhook`). `AUDIT.md` actualizado con Fase 10.
+
+### Qué queda
+1. **Manual (Railway)**: revisar logs del último deploy, configurar variables con `CHANNEL_MODE=telegram`, `TELEGRAM_SKIP_PHONE_MATCH=true`, `TRUST_PROXY=true`, `PUBLIC_BASE_URL=https://...`, `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` (solo `[A-Za-z0-9_-]`).
+2. **Manual (Telegram)**: si cambió el dominio, registrar webhook con el mismo `secret_token` y comprobar `getWebhookInfo`.
+3. **Prueba**: mensaje al bot por Telegram → respuesta + conversación visible en el panel.
+
+### Cómo probarlo
+- Validación: `npm run typecheck` y `npm test` (ambos deben pasar).
+- Configuración mínima Railway (ejemplo): ver `README-DEPLOYMENT.md` → "Railway: Telegram + FAQ".
+- Webhook: `POST https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook` con `url` + `secret_token` idéntico a `TELEGRAM_WEBHOOK_SECRET`.
+
+Nota: el despliegue en Railway no se retomó; se pasa a **Render** (siguiente sección). Los puntos `[OpenCode]` de robustez, versión de Node y documentación quedaron hechos.
+
+## FASE 10 — Despliegue en Render (Blueprint) (EN CURSO)
+
+Contexto: modo **Telegram + FAQ**, sin Ollama ni `COMPANY_DATABASE_URL`. Se despliega en Render con Docker + Postgres de Render. Las cuentas, los secretos y los comandos contra Render/Telegram los gestiona el dueño; aquí solo se preparan los archivos.
+
+### Qué se hizo
+1. **render.yaml** (nuevo; primera línea con `$schema`): web service `chatbot-soporte-backend` con `runtime: docker` (usa el `Dockerfile` existente, sin cambios), `region: oregon`, `plan: free`, `healthCheckPath: /api/health`, `autoDeploy: false`. Base Postgres de Render `chatbot-db` (`region: oregon`, `plan: free`) y `DATABASE_URL` vía `fromDatabase` con `property: connectionString` (la conexión interna).
+   - Valores fijos: `CHANNEL_MODE=telegram`, `TRUST_PROXY="true"`, `TELEGRAM_SKIP_PHONE_MATCH="true"` (entrecomillados porque el schema solo admite string o número en `value`).
+   - `sync: false` (se rellenan en el panel): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `PUBLIC_BASE_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
+   - No define `WHATSAPP_*`, `OLLAMA_*`, `LLM_*`, `CLOUDFLARE_*`, `COMPANY_*` ni `PORT` (Render lo inyecta). Ningún valor real.
+2. **scripts/set-telegram-webhook.ps1** (nuevo): lee `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` y `PUBLIC_BASE_URL` de las variables de entorno de la sesión (nunca de `.env`), valida formato, llama a `setWebhook` con `url=<PUBLIC_BASE_URL>/webhooks/telegram` y `secret_token`, y luego a `getWebhookInfo`. Falla con mensaje claro si falta una variable. No imprime el token ni el secreto (los errores muestran solo el estado HTTP). No se ejecutó.
+3. **README-DEPLOYMENT.md**: se sustituye la sección Railway por **"Render: Telegram + FAQ"** (pasos del Blueprint, variables a rellenar, healthcheck, uso del script y limitaciones del plan free).
+4. **PLAN.md / AUDIT.md**: Fase 10 actualizada con lo hecho, lo pendiente y cómo probarlo.
+
+### Qué queda
+1. **[Manual]** Crear el Blueprint en Render desde el repositorio y rellenar las variables `sync: false` en el panel.
+2. **[Manual]** Registrar el webhook con `scripts/set-telegram-webhook.ps1` y comprobar `getWebhookInfo`.
+3. **[Manual]** Probar: mensaje al bot por Telegram → respuesta y conversación visible en el panel.
+4. **[Riesgo]** El Postgres free de Render caduca a los 30 días y solo se permite uno por workspace.
+
+### Cómo probarlo
+- YAML: revisado a mano contra `https://render.com/schema/render.yaml.json` y parseado con PyYAML (`YAML OK`). **No** se pudo ejecutar `render blueprints validate` (CLI no instalado en el entorno).
+- Healthcheck: `GET /api/health` (público, sin sesión).
+- Webhook: `scripts/set-telegram-webhook.ps1` con las variables en la sesión; el script no debe imprimir secretos.
 
 ## Preparación para la entrega en servidor de empresa (IA local + BD de empresa)
 
