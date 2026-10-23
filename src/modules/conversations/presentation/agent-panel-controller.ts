@@ -64,21 +64,33 @@ export class AgentPanelController {
   }
 
   async getMessages(req: Request, res: Response): Promise<void> {
+    res.set("Cache-Control", "no-store");
     const conversationId = param(req, "id");
     const limit = clampMessagesLimit(Number(queryParam(req, "limit")) || 50);
     const beforeCursor = queryParam(req, "before");
+    const afterCursor = queryParam(req, "after");
 
-    let before: { createdAt: Date; id: string } | undefined;
-    if (beforeCursor) {
-      const parts = beforeCursor.split("|");
-      if (parts.length === 2 && parts[0] && parts[1]) {
-        before = { createdAt: new Date(parts[0]), id: parts[1] };
+    if (beforeCursor && afterCursor) {
+      res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Usa un solo cursor de mensajes" } });
+      return;
+    }
+
+    const rawCursor = afterCursor || beforeCursor;
+    let cursor: { createdAt: Date; id: string } | undefined;
+    if (rawCursor) {
+      const parts = rawCursor.split("|");
+      const createdAt = new Date(parts[0] ?? "");
+      const id = parts[1] ?? "";
+      if (parts.length !== 2 || Number.isNaN(createdAt.getTime()) || id.length === 0) {
+        res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Cursor de mensajes inválido" } });
+        return;
       }
+      cursor = { createdAt, id };
     }
 
     const messages = await this.deps.conversationRepository.listMessages(conversationId, {
       limit,
-      before,
+      ...(cursor ? (afterCursor ? { after: cursor } : { before: cursor }) : {}),
     });
     res.json({ messages });
   }

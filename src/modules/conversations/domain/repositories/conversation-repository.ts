@@ -42,6 +42,8 @@ export interface ListMessagesOptions {
   limit: number;
   /** Devuelve solo mensajes anteriores a este cursor. */
   before?: MessageCursor;
+  /** Devuelve solo mensajes posteriores a este cursor. */
+  after?: MessageCursor;
 }
 
 /** Limita el tamaño de página a [1, MAX_MESSAGES_PAGE]. */
@@ -62,7 +64,7 @@ export interface ConversationRepository {
   addMessage(data: AddMessageData): Promise<Message>;
   /** Registra un evento de la conversación para auditoría. */
   recordEvent(data: AddEventData): Promise<void>;
-  /** Últimos `limit` mensajes (antes del cursor si se da), en orden cronológico ascendente. */
+  /** Mensajes en orden cronológico ascendente, limitados y opcionalmente por cursor. */
   listMessages(conversationId: string, options: ListMessagesOptions): Promise<Message[]>;
   hasAgentMessage(conversationId: string): Promise<boolean>;
 }

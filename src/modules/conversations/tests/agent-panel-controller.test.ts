@@ -4,7 +4,8 @@ import type { Server } from "http";
 import { AgentPanelController } from "../presentation/agent-panel-controller.js";
 import { agentPanelRoutes } from "../presentation/agent-panel-routes.js";
 import type { ConversationRepository } from "../domain/repositories/conversation-repository.js";
-import type { Conversation } from "../domain/entities/conversation.js";
+import type { Conversation, Message } from "../domain/entities/conversation.js";
+import type { ListMessagesOptions } from "../domain/repositories/conversation-repository.js";
 import type { ChannelAdapter } from "../../../channels/domain/channel-adapter.js";
 import type { UserRepository } from "../../users/domain/repositories/user-repository.js";
 import type { User } from "../../users/domain/entities/user.js";
@@ -69,7 +70,19 @@ function makeApp(send: ReturnType<typeof vi.fn>, options: Options = {}) {
     },
     recordEvent: async () => undefined,
     hasAgentMessage: async () => false,
-    listMessages: async () => {
+    listMessages: async (_conversationId, listOptions) => {
+      listMessagesOptions.push(listOptions);
+      if (listOptions.after) {
+        const createdAt = new Date(listOptions.after.createdAt.getTime() + 1000);
+        return [{
+          id: "m-agent",
+          conversationId: conversation.id,
+          senderType: "AGENT",
+          content: "Respuesta reciente",
+          metadata: null,
+          createdAt,
+        }];
+      }
       if (!options.lastUserMessageAt) return [];
       return [
         {
@@ -83,6 +96,7 @@ function makeApp(send: ReturnType<typeof vi.fn>, options: Options = {}) {
       ];
     },
   };
+  const listMessagesOptions: ListMessagesOptions[] = [];
 
   const userRepository: UserRepository = {
     create: async (input) => ({ ...user, ...input }),
@@ -104,7 +118,7 @@ function makeApp(send: ReturnType<typeof vi.fn>, options: Options = {}) {
   });
   app.use("/api/agent/conversations", agentPanelRoutes(controller));
 
-  return { app, send, sentMessages, update };
+  return { app, send, sentMessages, update, listMessagesOptions };
 }
 
 async function start(app: ReturnType<typeof makeApp>["app"]) {
@@ -117,6 +131,44 @@ async function start(app: ReturnType<typeof makeApp>["app"]) {
 }
 
 describe("AgentPanelController", () => {
+  it("permite sondear solo los mensajes posteriores al cursor y evita caché", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const { app, listMessagesOptions } = makeApp(send);
+    const { server, base } = await start(app);
+    const createdAt = new Date("2026-10-23T10:00:00.000Z");
+    try {
+      const res = await fetch(
+        `${base}/c1/messages?after=${encodeURIComponent(`${createdAt.toISOString()}|m-user`)}`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      const data = (await res.json()) as { messages: Message[] };
+      expect(data.messages.map(({ id }) => id)).toEqual(["m-agent"]);
+      expect(listMessagesOptions[0]).toMatchObject({
+        limit: 50,
+        after: { createdAt, id: "m-user" },
+      });
+    } finally {
+      server.close();
+    }
+  });
+
+  it("rechaza cursores de sondeo inválidos o la combinación de dos cursores", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const { app } = makeApp(send);
+    const { server, base } = await start(app);
+    try {
+      const invalid = await fetch(`${base}/c1/messages?after=not-a-cursor`);
+      const both = await fetch(
+        `${base}/c1/messages?before=${encodeURIComponent("2026-10-23T10:00:00.000Z|m1")}&after=${encodeURIComponent("2026-10-23T10:00:00.000Z|m2")}`,
+      );
+      expect(invalid.status).toBe(422);
+      expect(both.status).toBe(422);
+    } finally {
+      server.close();
+    }
+  });
+
   it("la lista de espera expone el teléfono y el nombre reales del cliente", async () => {
     const send = vi.fn().mockResolvedValue(undefined);
     const { app } = makeApp(send);

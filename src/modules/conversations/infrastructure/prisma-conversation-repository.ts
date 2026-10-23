@@ -86,6 +86,7 @@ export class PrismaConversationRepository implements ConversationRepository {
 
   async listMessages(conversationId: string, options: ListMessagesOptions): Promise<Message[]> {
     const before = options.before;
+    const after = options.after;
     const rows = await this.db.message.findMany({
       where: {
         conversationId,
@@ -97,11 +98,21 @@ export class PrismaConversationRepository implements ConversationRepository {
               ],
             }
           : {}),
+        ...(after
+          ? {
+              OR: [
+                { createdAt: { gt: after.createdAt } },
+                { createdAt: after.createdAt, id: { gt: after.id } },
+              ],
+            }
+          : {}),
       },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      orderBy: before
+        ? [{ createdAt: "desc" }, { id: "desc" }]
+        : [{ createdAt: "asc" }, { id: "asc" }],
       take: clampMessagesLimit(options.limit),
     });
-    return rows.reverse().map((row) => this.toDomainMessage(row));
+    return (before ? rows.reverse() : rows).map((row) => this.toDomainMessage(row));
   }
 
   async hasAgentMessage(conversationId: string): Promise<boolean> {

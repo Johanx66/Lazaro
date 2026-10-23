@@ -10,11 +10,13 @@ import {
 function listMessages(all: Message[], conversationId: string, options: ListMessagesOptions) {
   const key = (m: { createdAt: Date; id: string }) => `${m.createdAt.toISOString()}|${m.id}`;
   const before = options.before ? key(options.before) : null;
+  const after = options.after ? key(options.after) : null;
   return all
     .filter((m) => m.conversationId === conversationId)
     .filter((m) => before === null || key(m) < before)
+    .filter((m) => after === null || key(m) > after)
     .sort((a, b) => (key(a) < key(b) ? -1 : 1))
-    .slice(-clampMessagesLimit(options.limit));
+    .slice(after === null ? -clampMessagesLimit(options.limit) : 0, after === null ? undefined : clampMessagesLimit(options.limit));
 }
 
 const make = (n: number, conversationId = "c1"): Message => ({
@@ -40,6 +42,17 @@ describe("listMessages", () => {
     const p3 = listMessages(all, "c1", { limit: 4, before: p2[0]! });
     expect(p2.map((m) => m.id)).toEqual(["m0003", "m0004", "m0005", "m0006"]);
     expect(p3.map((m) => m.id)).toEqual(["m0001", "m0002"]);
+  });
+
+  it("consulta mensajes nuevos desde cursor sin repetir y conserva orden con fechas iguales", () => {
+    const firstPage = listMessages(all, "c1", { limit: 4 });
+    const cursor = firstPage[firstPage.length - 1]!;
+    const newMessages = listMessages([...all, make(11), make(12)], "c1", {
+      limit: 4,
+      after: cursor,
+    });
+
+    expect(newMessages.map((m) => m.id)).toEqual(["m0011", "m0012"]);
   });
 
   it("ignora otras conversaciones", () => {

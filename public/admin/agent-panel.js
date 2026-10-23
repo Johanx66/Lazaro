@@ -5,6 +5,10 @@
     currentConversationId: null,
     currentConversation: null,
     messagesCursor: null,
+    latestMessageCursor: null,
+    messagesLoadGeneration: 0,
+    messagesPollTimer: null,
+    messagesPollInFlight: false,
     view: "waiting",
   };
 
@@ -23,6 +27,8 @@
   }
 
   function showLogin() {
+    stopMessagePolling();
+    state.messagesLoadGeneration += 1;
     $("panelView").hidden = true;
     $("loginView").hidden = false;
     $("loginPassword").value = "";
@@ -325,9 +331,12 @@
   }
 
   async function openConversation(conv) {
+    stopMessagePolling();
+    state.messagesLoadGeneration += 1;
     state.currentConversationId = conv.id;
     state.currentConversation = conv;
     state.messagesCursor = null;
+    state.latestMessageCursor = null;
     $("messagesContainer").innerHTML = "";
 
     $("waitingListContainer").hidden = true;
@@ -344,13 +353,17 @@
 
     await loadMessages();
 
+    if (state.currentConversationId === conv.id) startMessagePolling();
     checkWhatsAppWindow(conv);
   }
 
   function backToList() {
+    stopMessagePolling();
+    state.messagesLoadGeneration += 1;
     state.currentConversationId = null;
     state.currentConversation = null;
     state.messagesCursor = null;
+    state.latestMessageCursor = null;
     $("conversationDetail").hidden = true;
     $("messagesContainer").innerHTML = "";
     $("whatsappWarning").hidden = true;
@@ -364,24 +377,41 @@
     }
   }
 
-  async function loadMessages(reset) {
+  async function loadMessages(reset, incremental) {
+    var conversationId = state.currentConversationId;
+    if (!conversationId) return;
     var container = $("messagesContainer");
     if (reset) {
+      state.messagesLoadGeneration += 1;
       state.messagesCursor = null;
+      state.latestMessageCursor = null;
       container.innerHTML = "";
     }
+    if (incremental && !state.latestMessageCursor) {
+      await loadMessages(true);
+      return;
+    }
+    var loadGeneration = state.messagesLoadGeneration;
+    var requestedAfterCursor = incremental ? state.latestMessageCursor : null;
     var loading = document.createElement("div");
     loading.className = "loading";
     loading.textContent = "Cargando mensajes...";
-    container.appendChild(loading);
+    if (!incremental) container.appendChild(loading);
 
     try {
-      var url = "/api/agent/conversations/" + encodeURIComponent(state.currentConversationId) + "/messages?limit=50";
-      if (state.messagesCursor) {
+      var url = "/api/agent/conversations/" + encodeURIComponent(conversationId) + "/messages?limit=50";
+      if (requestedAfterCursor) {
+        url += "&after=" + encodeURIComponent(requestedAfterCursor);
+      } else if (state.messagesCursor) {
         url += "&before=" + encodeURIComponent(state.messagesCursor);
       }
       var res = await api("GET", url);
       loading.remove();
+      if (
+        state.currentConversationId !== conversationId ||
+        state.messagesLoadGeneration !== loadGeneration ||
+        (requestedAfterCursor && state.latestMessageCursor !== requestedAfterCursor)
+      ) return;
 
       if (res.status !== 200 || !res.data) {
         showError($("panelError"), forbiddenOr(res, "No se pudieron cargar los mensajes"));
@@ -390,7 +420,8 @@
 
       var messages = res.data.messages || [];
       if (messages.length > 0) {
-        state.messagesCursor = messages[0].createdAt + "|" + messages[0].id;
+        if (!incremental) state.messagesCursor = messages[0].createdAt + "|" + messages[0].id;
+        state.latestMessageCursor = messages[messages.length - 1].createdAt + "|" + messages[messages.length - 1].id;
       }
 
       messages.forEach(function (msg) {
@@ -400,9 +431,35 @@
       container.scrollTop = container.scrollHeight;
     } catch (e) {
       loading.remove();
+      if (state.currentConversationId !== conversationId || state.messagesLoadGeneration !== loadGeneration) return;
       var msg = errorText(e);
       if (msg) showError($("panelError"), msg);
     }
+  }
+
+  function stopMessagePolling() {
+    if (state.messagesPollTimer !== null) {
+      clearInterval(state.messagesPollTimer);
+      state.messagesPollTimer = null;
+    }
+  }
+
+  function pollMessages() {
+    if (
+      state.messagesPollInFlight ||
+      !state.currentConversationId ||
+      document.visibilityState !== "visible"
+    ) return;
+
+    state.messagesPollInFlight = true;
+    loadMessages(false, true).finally(function () {
+      state.messagesPollInFlight = false;
+    });
+  }
+
+  function startMessagePolling() {
+    stopMessagePolling();
+    state.messagesPollTimer = setInterval(pollMessages, 3000);
   }
 
   async function checkWhatsAppWindow(conv) {
@@ -545,6 +602,9 @@
   });
   $("closeConversationBtn").addEventListener("click", closeConversation);
   $("returnToBotBtn").addEventListener("click", returnToBot);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") pollMessages();
+  });
 
   checkSession();
 })();
