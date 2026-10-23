@@ -8,6 +8,12 @@ Reglas: ver `AGENTS.md`. Se trabaja UNA fase a la vez.
 
 ## Estado
 
+**Fase ACTUAL: 12 — Continuidad del contexto conversacional.** Render ya está
+conectado y el dueño confirma que el despliegue y el flujo por Telegram funcionan.
+La Fase 11 está operativa; para cerrarla formalmente falta registrar la salida literal
+de typecheck y tests. La Fase 9 sigue bloqueada por decisiones funcionales del dueño;
+no es trabajo activo. Railway se conserva como antecedente histórico.
+
 | Fase | Contenido | Estado |
 |---|---|---|
 | 0 | Canal web simulado (sin WhatsApp) + repositorio | **COMPLETADA** |
@@ -19,8 +25,10 @@ Reglas: ver `AGENTS.md`. Se trabaja UNA fase a la vez.
 | 6 | Despliegue en el servidor de la empresa | **COMPLETADA** |
 | 7 | WhatsApp real | **pendiente** |
 | 8 | Canal Telegram (webhook de la Bot API) | **COMPLETADA** |
-| 9 | Puerta de verificación obligatoria (todo contacto sin sesión recibe el mensaje estático y el enlace; cero IA) | **EN CURSO** — puerta y revocación por cambio de teléfono implementadas; revisión de permisos hecha. El mapeo `customer_id` está DECIDIDO e implementado (columna `company_users.companyCustomerId` + scripts de la BD de prueba de Lázaro Software). Quedan 3 decisiones funcionales del dueño (rol ADMIN en el chat, PQRS en el chat, configuración de Telegram) |
-| 10 | Despliegue en Render (Blueprint) | **EN CURSO** — `render.yaml`, script de webhook y docs listos; falta desplegar en Render y probar |
+| 9 | Puerta de verificación obligatoria (todo contacto sin sesión recibe el mensaje estático y el enlace; cero IA) | **BLOQUEADA** — implementación y revisión hechas; faltan decisiones funcionales del dueño (rol ADMIN en el chat, PQRS en el chat y configuración de Telegram) |
+| 10 | Recuperar despliegue en Railway (histórico; no retomado) | **EN ESPERA** — se decidió pasar a Render |
+| 11 | Despliegue en Render (Blueprint) | **OPERATIVA** — el dueño confirma que está conectada y probada; falta registrar la salida literal de typecheck y tests para el cierre formal |
+| 12 | Continuidad del contexto conversacional | **ACTUAL** — investigar por qué el bot a veces olvida mensajes anteriores de la misma conversación |
 
 Nota: todavía no hay número de WhatsApp. Todo se desarrolla y prueba con el chat web
 simulado. WhatsApp se conecta al final como un adaptador más.
@@ -297,7 +305,7 @@ respondible desde el panel; webhook rechaza peticiones sin el secreto.
 
 ---
 
-## FASE 9 — Puerta de verificación obligatoria (en curso)
+## FASE 9 — Puerta de verificación obligatoria (bloqueada por decisiones)
 
 Hecho (detalle, limitaciones y salida literal en `AUDIT.md` → "Puerta de verificación
 obligatoria"):
@@ -354,7 +362,7 @@ obligatoria"):
 ningún canal, y el enlace se entrega una sola vez mientras siga vigente. La fase
 **no se cierra** hasta que se decida lo anterior.
 
-## FASE 10 — Recuperar despliegue (Telegram) (Railway)
+## FASE 10 — Recuperar despliegue (Telegram) (Railway, histórico)
 
 Contexto: el servicio en Railway está caído. El canal real es Telegram (no Meta);
 la Fase 7 (WhatsApp) sigue pendiente y no aplica.
@@ -391,7 +399,7 @@ Criterio: el bot responde por Telegram en el entorno desplegado, sin secretos en
 el repositorio ni en los logs. Salida literal de `npm run typecheck` y `npm test`
 al cerrar la fase.
 
-## FASE 10 — Despliegue en Render (Blueprint) (EN CURSO)
+## FASE 11 — Despliegue en Render (Blueprint) (operativa)
 
 Contexto: modo **Telegram + FAQ**, sin Ollama ni `COMPANY_DATABASE_URL`. Se despliega
 en Render con Docker + Postgres de Render (`plan: free`). Las cuentas, los secretos y
@@ -422,19 +430,44 @@ Hecho:
 3. **`README-DEPLOYMENT.md`**: sección **"Render: Telegram + FAQ"** (pasos del
    Blueprint, variables del panel, healthcheck `/api/health`, uso del script y
    limitaciones del plan free).
-4. **`AUDIT.md`**: secciones Fase 10 (Railway, histórica) y Fase 10 (Render).
+4. **`AUDIT.md`**: secciones Fase 10 (Railway, histórica) y Fase 11 (Render).
 
-Pendiente (en orden):
-1. [Manual] Crear el Blueprint en Render desde el repositorio y rellenar las
-   variables `sync: false` en el panel.
-2. [Manual] Registrar el webhook con `scripts/set-telegram-webhook.ps1` y comprobar
-   `getWebhookInfo`.
-3. [Manual] Probar: mensaje al bot por Telegram → respuesta y conversación visible
-   en el panel.
-4. [Manual/Riesgo] El Postgres free de Render caduca a los 30 días (solo uno por
+Validación manual confirmada por el dueño: Render está conectado y el bot funciona
+por Telegram. Ya no queda pendiente crear el Blueprint, registrar el webhook ni
+probar ese flujo.
+
+Pendiente para el cierre formal:
+1. Registrar en `AUDIT.md` la salida literal de `npm run typecheck` y `npm test`,
+   según las reglas del proyecto.
+2. [Riesgo operativo] El Postgres free de Render caduca a los 30 días (solo uno por
    workspace); decidir si se mantiene free o se sube de plan antes de usarlo de
-   verdad.
+   forma estable.
 
-Criterio: el bot responde por Telegram desde Render, con el healthcheck
-`/api/health` en verde y sin secretos en el repositorio ni en los logs. La fase no
-se cierra hasta completar el despliegue y la prueba manual.
+Criterio: validación de Render registrada, salidas literales de typecheck y tests
+documentadas en `AUDIT.md`, y decisión sobre la retención de Postgres free antes de
+un uso estable; sin secretos en el repositorio ni en los logs.
+
+---
+
+## FASE 12 — Continuidad del contexto conversacional (ACTUAL)
+
+Problema reportado: a veces el bot pierde el contexto de mensajes anteriores de la
+misma conversación. El despliegue en Render y el flujo por Telegram ya funcionan;
+esta fase se centra en investigar y corregir la continuidad conversacional, no en
+volver a configurar el despliegue.
+
+1. Reproducir el problema con conversaciones de prueba y datos ficticios. Registrar
+   los mensajes previos, la pregunta de seguimiento y qué respuesta se esperaba y se
+   recibió; no guardar prompts, respuestas sensibles ni datos reales en logs.
+2. Seguir el recorrido de esos mensajes para identificar dónde se pierde el contexto
+   (lectura del historial, asociación a la conversación, construcción del contexto
+   enviado al modelo u otra causa observada). No asumir la causa antes de reproducirla.
+3. Corregir la causa identificada con un cambio acotado y añadir tests que verifiquen
+   que una pregunta de seguimiento puede usar mensajes previos de la misma conversación.
+4. Verificar también que mensajes de otra conversación no se incorporan al contexto y
+   que los flujos existentes de FAQ, sesión y transferencia a asesor siguen funcionando.
+
+**Criterio:** en una conversación de prueba, el bot responde correctamente a una
+pregunta que depende de mensajes anteriores; el contexto no se mezcla entre
+conversaciones y los flujos existentes no se regresionan. Ejecutar y mostrar la
+salida literal de `npm run typecheck` y `npm test`.
