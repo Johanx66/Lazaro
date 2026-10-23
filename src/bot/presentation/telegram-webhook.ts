@@ -150,10 +150,10 @@ export function telegramWebhookRouter(deps: TelegramWebhookDeps): Router {
         const result = await deps.handleInbound.execute(inbound);
         // Tras elegir una opción, el mensaje del menú se edita para quitar el
         // teclado y dejar constancia de lo elegido.
-        if (callback && callback.messageId !== null && result.menuAction && deps.menuAdapter) {
+        if (callback && callback.messageId !== null && (result.menu || result.menuAction) && deps.menuAdapter) {
           await deps.menuAdapter
-            .editMenu(callback.chatId, callback.messageId, {
-              text: menuSelectedText(result.menuAction),
+            .editMenu(callback.chatId, callback.messageId, result.menu ?? {
+              text: menuSelectedText(result.menuAction!),
               buttons: [],
             })
             .catch((error: unknown) => {

@@ -52,7 +52,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     query.mockResolvedValue({ rows: [] });
 
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
-    const result = await useCase.execute('dame el pedido 999 del usuario usr_102', {
+    const result = await useCase.execute('dame el pedido 999 de mi cuenta', {
       companyUserId: 'usr_101',
       role: 'USER',
       companyCustomerId: 'CLI-000001',
@@ -200,7 +200,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
   it('12. Una solicitud explícita de saldo selecciona consulta_saldo usando el cliente de la sesión', async () => {
     query.mockResolvedValue({ rows: [{ customer_id: 'usr_101', balance: '150.50', credit_limit: '500.00' }] });
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
-    const result = await useCase.execute('¿Cuál es mi saldo? usa el cliente usr_102', {
+    const result = await useCase.execute('¿Cuál es mi saldo?', {
       companyUserId: 'user-authenticated', role: 'USER', companyCustomerId: 'usr_101',
     }, 'Respuesta informativa.');
     expect(result.reply).toBe('Tu saldo es $150.50. Tu límite de crédito es $500.00.');
@@ -235,7 +235,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     'consulta saldo por regla: "%s"', async (input) => {
       query.mockResolvedValue({ rows: [{ customer_id: 'otro-id-ignorado', balance: '150.50', credit_limit: '500' }] });
       const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
-      const result = await useCase.execute(`${input} usa usr_999`, {
+      const result = await useCase.execute(input, {
         companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'usr_101',
       }, 'fallback');
       expect(result.reply).toContain('$150.50');
@@ -244,7 +244,37 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     },
   );
 
-  it.each(['mis pedidos', 'ultimos pedidos'])(
+  it.each([
+    'dame el saldo del cliente USR_102',
+    'saldo de usr_102',
+    'pedidos de USR_102',
+    'saldo del cliente CLI-000123',
+  ])('rechaza consultas que mencionan otro cliente: "%s"', async (input) => {
+    const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+    const result = await useCase.execute(input, {
+      companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'USR_101',
+    }, 'no debe usarse');
+    expect(result.reply).toBe('Solo puedo mostrarte la información de tu cuenta');
+    expect(query).not.toHaveBeenCalled();
+    expect(generateCompletion).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'que saldos tengo',
+    'cuanto tengo de saldo',
+    'cuanto es mi cupo',
+  ])('las variaciones de saldo se enrutan a consulta_saldo: "%s"', async (input) => {
+    query.mockResolvedValue({ rows: [{ customer_id: 'USR_101', balance: '150.50', credit_limit: '500.00' }] });
+    const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+    const result = await useCase.execute(input, {
+      companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'USR_101',
+    });
+    expect(result.reply).toContain('$150.50');
+    expect(query).toHaveBeenCalledWith(expect.anything(), ['USR_101']);
+    expect(generateCompletion).not.toHaveBeenCalled();
+  });
+
+  it.each(['mis pedidos', 'ultimos pedidos', 'mis ultimas compras', 'como van mis pedidos'])(
     'consulta pedidos recientes por regla: "%s"', async (input) => {
       toolRegistry.register(getRecentOrdersTool);
       query.mockResolvedValue({ rows: [{ order_id: '123', status: 'ENVIADO', total_amount: '20', created_at: new Date('2026-01-02T12:00:00Z') }] });
@@ -261,7 +291,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
   it('la regla de estado consulta pedido 123 solo dentro de la sesión', async () => {
     query.mockResolvedValue({ rows: [{ order_id: '123', status: 'ENVIADO', total_amount: '20', created_at: new Date() }] });
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
-    await useCase.execute('pedido 123 para el cliente usr_999', {
+    await useCase.execute('pedido 123 de mi cuenta', {
       companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'USR_101',
     });
     expect(query).toHaveBeenCalledWith(expect.anything(), ['123', 'USR_101']);
@@ -284,7 +314,7 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     query.mockResolvedValue({ rows: [{ customer_id: 'USR_101', balance: '10', credit_limit: '20' }] });
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
-    await useCase.execute('¿Cuál es mi saldo? cliente secreto USR_999', {
+    await useCase.execute('¿Cuál es mi saldo?', {
       companyUserId: 'user-secreto', role: 'USER', companyCustomerId: 'USR_101',
     });
     const logged = String(log.mock.calls[0]?.[0]);

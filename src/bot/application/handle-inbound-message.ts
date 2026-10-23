@@ -3,6 +3,7 @@ import type { ChannelAdapter } from "../../channels/domain/channel-adapter.js";
 import type { InboundMessage } from "../../channels/domain/channel-adapter.js";
 import type { MenuChannelAdapter } from "../../channels/domain/telegram-menu.js";
 import type { MessageProcessor, ProcessIncomingMessageResult } from "./message-processor.js";
+import { isMenuCallbackPayload } from "../domain/menu.js";
 
 export interface HandleInboundMessageDeps {
   processor: MessageProcessor;
@@ -26,7 +27,10 @@ export class HandleInboundMessageUseCase {
           buttons: [[{ label: "🔙 Volver al menú", callbackData: "handoff:back" }]],
         }
       : null;
-    if ((result.menu ?? handoffMenu) && this.deps.menuAdapter) {
+    const editingExistingMenu = inbound.channel === "TELEGRAM" && isMenuCallbackPayload(inbound.text) && result.menu !== undefined;
+    if (editingExistingMenu) {
+      // Telegram editará el mensaje que originó el callback en el webhook.
+    } else if ((result.menu ?? handoffMenu) && this.deps.menuAdapter) {
       // El menú se entrega como mensaje con teclado: no se manda el texto suelto.
       await this.deps.menuAdapter.sendMenu(inbound.contactId, result.menu ?? handoffMenu!).catch((error: unknown) => {
         console.error(

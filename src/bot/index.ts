@@ -33,6 +33,7 @@ import { PQRS_CATEGORY_PREFIX } from "./domain/menu.js";
 import type { WhatsAppSender } from "./domain/whatsapp.js";
 import { PrismaKnowledgeBaseRepository } from "./infrastructure/prisma-knowledge-repository.js";
 import type { RagService } from "../modules/rag/rag-service.js";
+import type { RagEntry } from "../modules/rag/rag-service.js";
 import { telegramWebhookRouter } from "./presentation/telegram-webhook.js";
 import { whatsappWebhookRouter } from "./presentation/whatsapp-webhook.js";
 
@@ -143,6 +144,21 @@ export function wireBot(app: Express, deps: WireBotDeps): void {
     identity: deps.identity,
     classifier: deps.classifier,
     dataQuery: deps.dataQuery,
+    listPqrsMenuEntries: async () => (await deps.prisma.knowledgeEntry.findMany({ where: { active: true, category: { startsWith: PQRS_CATEGORY_PREFIX } }, select: { id: true, topic: true, question: true, tool: true } })).map((entry) => ({ id: entry.id, topic: entry.topic, question: entry.question, tool: entry.tool })),
+    getPqrsMenuEntry: async (id): Promise<RagEntry | null> => {
+      const entry = await deps.prisma.knowledgeEntry.findUnique({ where: { id } });
+      if (!entry || !entry.active || !entry.category.startsWith(PQRS_CATEGORY_PREFIX)) return null;
+      return {
+        id: entry.id, category: entry.category, topic: entry.topic, intent: entry.intent,
+        question: entry.question, variations: entry.variations, keywords: entry.keywords,
+        answer: entry.answer, answerAfterRegistration: entry.answerAfterRegistration,
+        priority: entry.priority, escalationMode: entry.escalationMode as RagEntry["escalationMode"],
+        escalationReason: entry.escalationReason, requiredData: entry.requiredData,
+        suggestedActions: entry.suggestedActions, confirmationQuestion: entry.confirmationQuestion,
+        tool: entry.tool,
+      };
+    },
+    menuPlaceholders: { companyName: deps.env.companyName || "Lázaro Software", officialChannel: deps.env.officialChannel || "el canal oficial de la empresa", conditionsUrl: deps.env.conditionsUrl || "las condiciones publicadas por la empresa" },
   });
 
   let expiryCheckRunning = false;

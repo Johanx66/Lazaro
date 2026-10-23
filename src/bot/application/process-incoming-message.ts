@@ -20,12 +20,18 @@ import {
   MENU_COMMAND,
   MENU_LABELS,
   parseMenuCallback,
+  isMenuCallbackPayload,
+  areaForTopic,
+  buildAreaTopicsMenu,
+  buildTopicQuestionsMenu,
+  buildDataMenu,
   parseMenuSelection,
   PQRS_ASK_DETAILS,
 } from "../domain/menu.js";
-import type { MenuAction } from "../domain/menu.js";
+import type { DataMenuAction, MenuAction, MenuKnowledgeEntry } from "../domain/menu.js";
 import type { RagService } from "../../modules/rag/rag-service.js";
-import { maskLongNumbers } from "../../modules/rag/rag-service.js";
+import { maskLongNumbers, renderPlaceholders } from "../../modules/rag/rag-service.js";
+import type { RagEntry } from "../../modules/rag/rag-service.js";
 
 export interface UserAccountPort {
   findOrCreateUser(phone: string, name: string, channel: ChatChannel): Promise<{ id: string }>;
@@ -61,6 +67,7 @@ export interface DataQueryPort {
     session: { companyUserId: string; role: CompanyRole; companyCustomerId: string | null },
     fallbackAnswer?: string,
   ): Promise<{ reply: string; handoffRequired?: boolean }>;
+  executeTool?(toolName: "get_customer_balance" | "get_recent_orders", session: { companyUserId: string; role: CompanyRole; companyCustomerId: string | null }): Promise<{ reply: string; handoffRequired?: boolean }>;
 }
 
 /**
@@ -251,6 +258,9 @@ export interface ProcessIncomingMessageDeps {
   classifier?: IntentClassifierPort;
   /** Opcional: consulta de datos de la empresa (Fase 5). Requerido si hay classifier. */
   dataQuery?: DataQueryPort;
+  listPqrsMenuEntries?: () => Promise<MenuKnowledgeEntry[]>;
+  getPqrsMenuEntry?: (id: string) => Promise<RagEntry | null>;
+  menuPlaceholders?: { companyName: string; officialChannel: string; conditionsUrl: string };
 }
 
 export class ProcessIncomingMessageUseCase {
@@ -278,6 +288,8 @@ export class ProcessIncomingMessageUseCase {
     const phone = inbound.contactId;
     const name = inbound.name;
     const channel = inbound.channel;
+    const callbackLike = channel === "TELEGRAM" && isMenuCallbackPayload(inbound.text);
+    const callbackAction = callbackLike ? parseMenuCallback(inbound.text) : null;
     // Un botón pulsado llega como `callback_data`; se traduce a la etiqueta
     // legible de la opción para que el historial no guarde identificadores internos.
     const text = this.resolveInboundText(inbound.text);
@@ -309,6 +321,9 @@ export class ProcessIncomingMessageUseCase {
           return this.showMenu(conversation.id, channel);
         }
       } else {
+        if (callbackLike && callbackAction?.type === "unknown") {
+          return this.controlledUnknownCallback(conversation.id, sent.status);
+        }
         const agentHasReplied = await handoff.hasAgentMessage(conversation.id);
         if (!agentHasReplied && Date.now() - startedAt.getTime() >= this.handoffTimeoutMinutes * 60_000) {
           await handoff.cancel(conversation.id);
@@ -332,6 +347,7 @@ export class ProcessIncomingMessageUseCase {
 
     if (sent.status !== "BOT_HANDLING" && !returnedToBotWithoutTicket) {
       resetMissCount(conversation.id);
+      if (callbackLike) return this.controlledUnknownCallback(conversation.id, sent.status);
       return {
         conversationId: conversation.id,
         reply: null,
@@ -346,6 +362,11 @@ export class ProcessIncomingMessageUseCase {
     // reclamo, petición, PQRS o sugerencia no pueda saltarse la verificación.
     const gate = await this.handleUnverifiedGate(text, channel, phone, conversation.id);
     if (gate) return gate;
+
+    if (callbackLike) {
+      if (!callbackAction || callbackAction.type === "unknown") return this.controlledUnknownCallback(conversation.id, sent.status);
+      return this.handleMenuCallback(callbackAction, user.id, conversation.id, channel, phone, name, text);
+    }
 
     const offeredContext = this.pendingAgentOffers.get(conversation.id);
     if (offeredContext) {
@@ -521,8 +542,14 @@ export class ProcessIncomingMessageUseCase {
     phone: string,
     name: string,
     fallbackAnswer?: string,
+    fixedTool?: "get_customer_balance" | "get_recent_orders",
   ): Promise<ProcessIncomingMessageResult> {
     const { identity, dataQuery } = this.deps;
+    if (fixedTool && (!dataQuery || !dataQuery.executeTool)) {
+      const reply = "No puedo consultar esos datos en este momento.";
+      const saved = await this.deps.conversations.recordBotReply(conversationId, reply);
+      return { conversationId, reply, handledByBot: true, status: saved.status };
+    }
     if (!dataQuery) {
       resetMissCount(conversationId);
       return this.transfer(conversationId, userId, phone, name, text, "LOW_CONFIDENCE");
@@ -550,7 +577,9 @@ export class ProcessIncomingMessageUseCase {
         role: principal.role,
         companyCustomerId: principal.companyCustomerId,
       };
-      result = fallbackAnswer === undefined
+      result = fixedTool && dataQuery.executeTool
+        ? await dataQuery.executeTool(fixedTool, session)
+        : fallbackAnswer === undefined
         ? await dataQuery.execute(maskLongNumbers(text), session)
         : await dataQuery.execute(maskLongNumbers(text), session, fallbackAnswer);
     } catch {
@@ -679,7 +708,76 @@ export class ProcessIncomingMessageUseCase {
   private resolveInboundText(raw: string): string {
     const action = parseMenuCallback(raw);
     if (raw === "handoff:back") return "volver al menú";
-    return action ? MENU_LABELS[action] : raw;
+    if (!isMenuCallbackPayload(raw)) return raw;
+    if (!action || action.type === "unknown") return "acción de menú no disponible";
+    if (action.type === "home") return "volver al menú";
+    if (action.type === "area") return `área ${action.area}`;
+    if (action.type === "topic") return `tema ${action.topic}`;
+    if (action.type === "questions-page") return `página ${action.page + 1}`;
+    if (action.type === "entry") return `pregunta ${action.entryId}`;
+    if (action.type === "data-action") return action.action === "balance" ? "mi saldo" : "mis pedidos";
+    if (action.type === "advisor") return MENU_LABELS.asesor;
+    if (action.type === "data-menu") return MENU_LABELS.datos;
+    return MENU_LABELS[action.action];
+  }
+
+  private async controlledUnknownCallback(conversationId: string, _status: ConversationStatus): Promise<ProcessIncomingMessageResult> {
+    const menu = buildAttentionMenu();
+    const text = `Ese botón ya no está disponible. Elige una opción del menú:\n\n${menu.text}`;
+    const saved = await this.deps.conversations.recordBotReply(conversationId, text);
+    return { conversationId, reply: text, handledByBot: true, status: saved.status, menu: { ...menu, text } };
+  }
+
+  private async handleMenuCallback(
+    action: NonNullable<ReturnType<typeof parseMenuCallback>>, userId: string, conversationId: string,
+    channel: ChatChannel, phone: string, name: string, text: string,
+  ): Promise<ProcessIncomingMessageResult> {
+    if (action.type === "unknown") return this.controlledUnknownCallback(conversationId, "BOT_HANDLING");
+    if (action.type === "home") return this.showMenu(conversationId, channel);
+    if (action.type === "advisor") return this.handleMenuAction("asesor", userId, conversationId, channel, phone, name);
+    if (action.type === "data-menu") return this.showCustomMenu(conversationId, buildDataMenu());
+    if (action.type === "data-action") return this.executeDataButton(action.action, userId, conversationId, channel, phone, name);
+    const entries = await this.deps.listPqrsMenuEntries?.() ?? [];
+    if (action.type === "area") return this.showCustomMenu(conversationId, buildAreaTopicsMenu(action.area));
+    if (action.type === "topic") {
+      const area = areaForTopic(action.topic);
+      if (!area) return this.controlledUnknownCallback(conversationId, "BOT_HANDLING");
+      return this.showCustomMenu(conversationId, buildTopicQuestionsMenu(action.topic, entries, 0, area));
+    }
+    if (action.type === "questions-page") {
+      const area = areaForTopic(action.topic);
+      if (!area) return this.controlledUnknownCallback(conversationId, "BOT_HANDLING");
+      return this.showCustomMenu(conversationId, buildTopicQuestionsMenu(action.topic, entries, action.page, area));
+    }
+    if (action.type === "entry") {
+      const entry = await this.deps.getPqrsMenuEntry?.(action.entryId) ?? this.deps.rag?.getEntry(action.entryId) ?? null;
+      if (!entry) return this.controlledUnknownCallback(conversationId, "BOT_HANDLING");
+      if (entry.tool === "consulta_saldo" || entry.tool === "consulta_pedidos") {
+        return this.showCustomMenu(conversationId, buildDataMenu(entry.tool === "consulta_saldo" ? "balance" : "orders"));
+      }
+      const safeEntry = { ...entry, answer: this.cleanMenuText(entry.answer), question: this.cleanMenuText(entry.question), confirmationQuestion: entry.confirmationQuestion ? this.cleanMenuText(entry.confirmationQuestion) : null };
+      const result = await this.replyWithRagEntry(safeEntry, 1, 0, conversationId, userId, channel, phone, name, safeEntry.question);
+      return { ...result, menuAction: "pqrs" };
+    }
+    return this.controlledUnknownCallback(conversationId, "BOT_HANDLING");
+  }
+
+  private cleanMenuText(value: string): string {
+    const rendered = renderPlaceholders(value, this.deps.menuPlaceholders ?? {
+      companyName: "Lázaro Software", officialChannel: "el canal oficial de la empresa", conditionsUrl: "las condiciones publicadas por la empresa",
+    });
+    return rendered.replace(/\{\{[^{}]+\}\}/gu, "información disponible en el canal oficial");
+  }
+
+  private async showCustomMenu(conversationId: string, menu: TelegramMenu): Promise<ProcessIncomingMessageResult> {
+    const saved = await this.deps.conversations.recordBotReply(conversationId, menu.text);
+    return { conversationId, reply: menu.text, handledByBot: true, status: saved.status, menu };
+  }
+
+  private async executeDataButton(action: DataMenuAction, userId: string, conversationId: string, channel: ChatChannel, phone: string, name: string): Promise<ProcessIncomingMessageResult> {
+    const toolName = action === "balance" ? "get_customer_balance" : "get_recent_orders";
+    const result = await this.handleDataQuery(action === "balance" ? "consulta mi saldo" : "consulta mis pedidos recientes", userId, conversationId, channel, phone, name, undefined, toolName);
+    return { ...result, menuAction: "datos" };
   }
 
   /**

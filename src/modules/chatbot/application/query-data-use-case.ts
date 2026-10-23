@@ -36,6 +36,12 @@ function normalize(text: string): string {
   return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
+function hasOtherCustomerCode(input: string, sessionCustomerId: string): boolean {
+  const codes = input.match(/\b(?:USR_[A-Z0-9]+|CLI-\d{6})\b/gi) ?? [];
+  const sessionCode = normalize(sessionCustomerId).toUpperCase();
+  return codes.some((code) => normalize(code).toUpperCase() !== sessionCode);
+}
+
 /** Reglas deterministas para peticiones inequívocas; null deja decidir al selector. */
 function selectByRule(input: string): ToolSelection | null {
   const text = normalize(input).replace(/[¿?¡!.,;:]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -45,11 +51,11 @@ function selectByRule(input: string): ToolSelection | null {
     return { action: 'informative_answer' };
   }
 
-  if (/\b(mi saldo|cuanto debo(?: pagar)?|cuanto tengo|mi deuda|mi credito|consultar mi saldo|ver mi saldo|muestrame mi saldo|cual es mi saldo)\b/.test(text)) {
+  if (/\b(mi saldo|que saldos tengo|cuanto tengo(?: de saldo)?|cuanto debo(?: pagar)?|cuanto es mi cupo|mi deuda|mi credito|consultar mi saldo|ver mi saldo|muestrame mi saldo|cual es mi saldo)\b/.test(text)) {
     return { action: 'tool', toolName: 'get_customer_balance', parameters: {} };
   }
 
-  if (/\b(pedidos|ultimos pedidos|pedidos recientes|mis pedidos)\b/.test(text) &&
+  if (/\b(pedidos|ultimos pedidos|pedidos recientes|mis pedidos|mis ultimas compras|como van mis pedidos)\b/.test(text) &&
       !/\bpedido\s+\d+\b/.test(text)) {
     return { action: 'tool', toolName: 'get_recent_orders', parameters: { limit: 5 } };
   }
@@ -114,10 +120,15 @@ export class QueryDataUseCase {
   ) {}
 
   async execute(userInput: string, session: DataQuerySession, fallbackAnswer?: string): Promise<DataQueryResult> {
-    const hasCompanyCustomerId = session.companyCustomerId !== null && session.companyCustomerId.length > 0;
-    if (!hasCompanyCustomerId) {
+    const companyCustomerId = session.companyCustomerId;
+    const hasCompanyCustomerId = companyCustomerId !== null && companyCustomerId.length > 0;
+    if (companyCustomerId === null || companyCustomerId.length === 0) {
       logToolSelection('informative_answer', 'customer_not_linked', false);
       return { reply: CUSTOMER_NOT_LINKED_REPLY };
+    }
+    if (hasOtherCustomerCode(userInput, companyCustomerId)) {
+      logToolSelection('informative_answer', 'customer_id_mismatch', true);
+      return { reply: 'Solo puedo mostrarte la información de tu cuenta' };
     }
 
     const availableTools = this.toolRegistry.getAllForRole(session.role);
@@ -190,7 +201,7 @@ Responde ÚNICAMENTE en JSON con esta estructura: {"action":"informative_answer"
     try {
       queryData = await tool.execute(
         parsedParams.data,
-        { companyCustomerId: session.companyCustomerId as string, userRole: session.role },
+        { companyCustomerId, userRole: session.role },
         this.companyDb,
       );
     } catch {
@@ -207,5 +218,32 @@ Responde ÚNICAMENTE en JSON con esta estructura: {"action":"informative_answer"
       ? queryData.slice(0, this.maxRows)
       : queryData;
     return { reply: renderFixedReply(tool.name, limitedData) };
+  }
+
+  async executeTool(toolName: 'get_customer_balance' | 'get_recent_orders', session: DataQuerySession): Promise<DataQueryResult> {
+    if (!session.companyCustomerId) {
+      logToolSelection('informative_answer', 'customer_not_linked', false);
+      return { reply: CUSTOMER_NOT_LINKED_REPLY };
+    }
+    const tool = this.toolRegistry.get(toolName);
+    if (!tool || !tool.allowedRoles.includes(session.role)) {
+      logToolSelection('informative_answer', 'tool_unavailable_or_role_not_allowed', true);
+      return { reply: 'No puedo consultar esos datos en este momento.' };
+    }
+    const params = tool.parse(toolName === 'get_recent_orders' ? { limit: 5 } : {});
+    if (!params.ok) {
+      logToolSelection('informative_answer', 'invalid_fixed_parameters', true);
+      return { reply: 'No puedo consultar esos datos en este momento.' };
+    }
+    logToolSelection(`tool:${tool.name}`, null, true);
+    try {
+      const data = await tool.execute(params.data, { companyCustomerId: session.companyCustomerId, userRole: session.role }, this.companyDb);
+      if (data === null || data === undefined || (Array.isArray(data) && data.length === 0)) {
+        return { reply: 'No encontré información relacionada con tu consulta.' };
+      }
+      return { reply: renderFixedReply(tool.name, data) };
+    } catch {
+      return { reply: 'En este momento no pude consultar la información. Te transfiero con un asesor.', handoffRequired: true };
+    }
   }
 }
