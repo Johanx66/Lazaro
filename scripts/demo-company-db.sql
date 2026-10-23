@@ -128,14 +128,14 @@ COMMIT;
 --    \gexec ejecuta SQL generado por psql fuera de bloques dollar-quoted para que
 --    las variables readonly_role y readonly_password sí se interpolen.
 SELECT format(
-    'CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS',
+    'CREATE ROLE %I LOGIN PASSWORD %L',
     :'readonly_role', :'readonly_password'
 )
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'readonly_role')
 \gexec
 
 SELECT format(
-    'ALTER ROLE %I WITH LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS',
+    'ALTER ROLE %I WITH LOGIN PASSWORD %L',
     :'readonly_role', :'readonly_password'
 )
 \gexec
