@@ -24,7 +24,8 @@ interface Options {
 function makeApp(options: Options = {}) {
   const execute = options.execute ?? vi.fn().mockResolvedValue(undefined);
   const handleInbound = { execute } as unknown as HandleInboundMessageUseCase;
-  const adapter = new TelegramAdapter({ sendText: vi.fn().mockResolvedValue(undefined) });
+  const sendText = vi.fn().mockResolvedValue(undefined);
+  const adapter = new TelegramAdapter({ sendText });
 
   const app = express();
   app.use(express.json());
@@ -36,7 +37,7 @@ function makeApp(options: Options = {}) {
       handleInbound,
     }),
   );
-  return { app, execute: execute as ReturnType<typeof vi.fn> };
+  return { app, execute: execute as ReturnType<typeof vi.fn>, sendText };
 }
 
 async function start(app: ReturnType<typeof makeApp>["app"]): Promise<{ server: Server; base: string }> {
@@ -157,24 +158,27 @@ describe("telegramWebhookRouter", () => {
     }
   });
 
-  it("si el procesamiento falla responde 500 y permite el reintento del mismo update", async () => {
+  it("si el procesamiento falla avisa al usuario, responde 200 y deduplica el update", async () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       const execute = vi
         .fn()
         .mockRejectedValueOnce(new Error("fallo transitorio"))
         .mockResolvedValueOnce(undefined);
-      const { app } = makeApp({ execute: execute as unknown as (inbound: InboundMessage) => Promise<void> });
+      const { app, sendText } = makeApp({ execute: execute as unknown as (inbound: InboundMessage) => Promise<void> });
       const { server, base } = await start(app);
       try {
         const first = await post(base, makeUpdate("hola", 11));
-        expect(first.status).toBe(500);
-        const data = (await first.json()) as { error: { code: string } };
-        expect(data.error.code).toBe("WEBHOOK_ERROR");
+        expect(first.status).toBe(200);
+        expect(await first.json()).toEqual({ status: "ok" });
+        expect(sendText).toHaveBeenCalledWith(
+          "570123456789",
+          expect.stringContaining("ocurrió un problema al procesar tu mensaje"),
+        );
 
         const retry = await post(base, makeUpdate("hola", 11));
         expect(retry.status).toBe(200);
-        expect(execute).toHaveBeenCalledTimes(2);
+        expect(execute).toHaveBeenCalledTimes(1);
       } finally {
         server.close();
       }

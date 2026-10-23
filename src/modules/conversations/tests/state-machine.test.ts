@@ -30,6 +30,13 @@ describe("máquina de estados de conversación", () => {
     }
   });
 
+  it("permite iniciar una transferencia desde OPEN", () => {
+    expect(transition({ status: "OPEN", assignedAgentId: "a1" }, { type: "TICKET_CREATED" })).toEqual({
+      status: "WAITING_AGENT",
+      assignedAgentId: "a1",
+    });
+  });
+
   it("consulta una transición no permitida como inválida", () => {
     expect(canTransition("CLOSED", "BOT_RESPONSE")).toBe(false);
     expect(canTransition("OPEN", "TRANSFERRED_TO_HUMAN")).toBe(false);
@@ -39,6 +46,11 @@ describe("máquina de estados de conversación", () => {
     expect(() =>
       transition({ status: "CLOSED", assignedAgentId: null }, { type: "BOT_RESPONSE" }),
     ).toThrow(InvalidTransitionError);
+  });
+
+  it("permite escalar a asesor después de que el bot respondió y quedó en WAITING_USER", () => {
+    expect(transition({ status: "WAITING_USER", assignedAgentId: null }, { type: "TICKET_CREATED" }))
+      .toEqual({ status: "WAITING_AGENT", assignedAgentId: null });
   });
 
   it("no permite TRANSFERRED_TO_HUMAN desde OPEN", () => {

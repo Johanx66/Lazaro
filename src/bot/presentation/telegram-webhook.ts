@@ -174,10 +174,23 @@ export function telegramWebhookRouter(deps: TelegramWebhookDeps): Router {
           JSON.stringify({
             level: "error",
             msg: "error procesando webhook de Telegram",
-            error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+            errorName: error instanceof Error ? error.name : "UnknownError",
           }),
         );
-        res.status(500).json({ error: { code: "WEBHOOK_ERROR", message: "No se pudo procesar el mensaje" } });
+        await deps.adapter.send(inbound.contactId, {
+          text: "Lo siento, ocurrió un problema al procesar tu mensaje. Inténtalo de nuevo o escribe «menú» para ver las opciones.",
+          sender: "BOT",
+        }).catch((sendError: unknown) => {
+          console.error(
+            JSON.stringify({
+              level: "warn",
+              msg: "no se pudo enviar el aviso de error del webhook de Telegram",
+              errorName: sendError instanceof Error ? sendError.name : "UnknownError",
+            }),
+          );
+        });
+        if (updateId !== null) dedupe.add(updateId);
+        res.status(200).json({ status: "ok" });
       }
     },
   );

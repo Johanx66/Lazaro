@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TransferToHumanUseCase } from "../application/use-cases/transfer-to-human.js";
 import type {
   AddEventData,
@@ -61,7 +61,9 @@ function makeRepo(initial: Conversation) {
     create: async () => initial,
     findById: async (id) => store.get(id) ?? null,
     findActiveByUserIdAndChannel: async () => null,
-    findWaitingForAgent: async () => [],
+    findWaitingForAgent: async () => [...store.values()].filter((conversation) =>
+      conversation.status === "WAITING_AGENT" || (conversation.status === "OPEN" && conversation.assignedAgentId !== null),
+    ),
     findClosed: async () => [],
     update: async (id, data: UpdateConversationData) => {
       const current = store.get(id);
@@ -156,6 +158,29 @@ describe("TransferToHumanUseCase", () => {
     });
     expect(store.get("c1")?.status).toBe("WAITING_AGENT");
     expect(events.map((e) => e.type)).toEqual(["TICKET_CREATED", "TRANSFERRED_TO_HUMAN"]);
+  });
+
+  it("retransfiere desde OPEN, limpia la asignación anterior y deja la conversación visible en el panel", async () => {
+    const initial = makeConversation({ status: "OPEN", assignedAgentId: "a1" });
+    const { repo, store, events } = makeRepo(initial);
+    const createTicket = { execute: vi.fn(async () => ticketFor("c1")) };
+    const assignTicket = { execute: async (_ticketId: string, _agentId: string | null) => ticketFor("c1") };
+    const pickAvailableAgent = { execute: async () => null };
+    const useCase = new TransferToHumanUseCase(
+      repo,
+      createTicket as unknown as CreateTicketUseCase,
+      assignTicket as unknown as AssignTicketUseCase,
+      pickAvailableAgent as unknown as PickAvailableAgentUseCase,
+    );
+    const result = await useCase.execute(input);
+    const panelConversations = await repo.findWaitingForAgent();
+
+    expect(result.ticketId).toBe("t1");
+    expect(createTicket.execute).toHaveBeenCalledOnce();
+    expect(result.status).toBe("WAITING_AGENT");
+    expect(store.get("c1")).toMatchObject({ status: "WAITING_AGENT", assignedAgentId: null });
+    expect(panelConversations.map(({ id }) => id)).toContain("c1");
+    expect(events[0]?.type).toBe("TICKET_CREATED");
   });
 
   it("acepta transferencias por confianza baja o por muchos fallos", async () => {

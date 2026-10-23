@@ -42,6 +42,7 @@ export const TRANSITIONS: Record<
   Partial<Record<ConversationDomainEventType, ConversationStatus>>
 > = {
   OPEN: {
+    TICKET_CREATED: "WAITING_AGENT",
     MESSAGE_SENT: "WAITING_USER",
     BOT_RESPONSE: "WAITING_USER",
     MESSAGE_RECEIVED: "OPEN",
@@ -58,6 +59,7 @@ export const TRANSITIONS: Record<
   },
   WAITING_USER: {
     MESSAGE_RECEIVED: "BOT_HANDLING",
+    TICKET_CREATED: "WAITING_AGENT",
     CONVERSATION_RESOLVED: "RESOLVED",
   },
   WAITING_AGENT: {

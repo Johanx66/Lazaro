@@ -1,6 +1,7 @@
 import type { TelegramInlineButton, TelegramMenu } from "../../channels/domain/telegram-menu.js";
 
 export type MenuAction = "pqrs" | "datos" | "asesor";
+export const MENU_ACTIONS: readonly MenuAction[] = ["pqrs", "datos", "asesor"];
 export type DataMenuAction = "balance" | "orders";
 export type PqrsAreaId = "compras" | "pedidos" | "pagos" | "cuenta" | "servicios" | "atencion" | "general";
 
@@ -33,6 +34,7 @@ export const PQRS_TOPIC_LABELS: Readonly<Record<string, string>> = {
 
 export type MenuCallback =
   | { type: "home" }
+  | { type: "areas" }
   | { type: "legacy-action"; action: MenuAction }
   | { type: "area"; area: PqrsAreaId }
   | { type: "topic"; topic: string }
@@ -81,17 +83,25 @@ function button(label: string, callbackData: string): TelegramInlineButton {
 }
 
 export function buildAttentionMenu(): TelegramMenu {
-  const areaButtons = PQRS_AREAS.map((area) => button(area.label, `menu:area:${area.id}`));
-  areaButtons.push(button("👤 Mis datos", MENU_CALLBACK_DATA.datos));
-  areaButtons.push(button("👨‍💼 Hablar con un asesor", MENU_CALLBACK_DATA.asesor));
-  return { text: ATTENTION_MENU_TEXT, buttons: inlineRows(areaButtons) };
+  const buttons = MENU_ACTIONS.map((action) => button(
+    action === "pqrs" ? "📋 PQRS" : action === "datos" ? "👤 Mis datos" : "👨‍💼 Hablar con un asesor",
+    MENU_CALLBACK_DATA[action],
+  ));
+  return { text: ATTENTION_MENU_TEXT, buttons: buttons.map((item) => [item]) };
+}
+
+export function buildPqrsAreasMenu(): TelegramMenu {
+  const buttons = PQRS_AREAS.map((area) => button(area.label, `menu:area:${area.id}`));
+  buttons.push(button("🔙 Volver al menú", "pqrs:home"));
+  // Las etiquetas de las áreas son largas; una por fila evita truncarlas en móvil.
+  return { text: "PQRS. Elige un área:", buttons: buttons.map((item) => [item]) };
 }
 
 export function buildAreaTopicsMenu(areaId: PqrsAreaId): TelegramMenu {
   const area = PQRS_AREAS.find((item) => item.id === areaId);
   if (!area) return buildAttentionMenu();
   const buttons = area.topics.map((topic) => button(PQRS_TOPIC_LABELS[topic] ?? topic, `pqrs:topic:${topic}`));
-  buttons.push(button("🔙 Volver", "pqrs:home"));
+  buttons.push(button("🔙 Volver a áreas", "menu:pqrs"));
   return { text: `${area.label}\nElige un tema:`, buttons: inlineRows(buttons) };
 }
 
@@ -150,7 +160,7 @@ export function areaForTopic(topic: string): PqrsAreaId | null {
 /** Convierte cada callback conocido en una acción cerrada; ningún dato se interpreta como texto libre. */
 export function parseMenuCallback(data: string): MenuCallback | null {
   const legacy = LEGACY_CALLBACKS.get(data);
-  if (legacy) return legacy === "asesor" ? { type: "advisor" } : legacy === "datos" ? { type: "data-menu" } : { type: "home" };
+  if (legacy) return legacy === "asesor" ? { type: "advisor" } : legacy === "datos" ? { type: "data-menu" } : { type: "areas" };
   if (data === "handoff:back") return { type: "home" };
   if (data === "pqrs:home") return { type: "home" };
   if (data === "menu:home") return { type: "home" };

@@ -46,6 +46,16 @@
     return fallback;
   }
 
+  function togglePasswordVisibility() {
+    var password = $("password");
+    var toggle = $("passwordToggle");
+    var showPassword = password.type === "password";
+    password.type = showPassword ? "text" : "password";
+    toggle.textContent = showPassword ? "Ocultar" : "Mostrar";
+    toggle.setAttribute("aria-label", showPassword ? "Ocultar contraseña" : "Mostrar contraseña");
+    toggle.setAttribute("aria-pressed", showPassword ? "true" : "false");
+  }
+
   async function checkLink() {
     if (token.length === 0) {
       showInvalid("El enlace de acceso no es válido, ya venció o ya se usó");
@@ -102,5 +112,6 @@
   }
 
   $("loginForm").addEventListener("submit", onSubmit);
+  $("passwordToggle").addEventListener("click", togglePasswordVisibility);
   checkLink();
 })();

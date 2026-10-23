@@ -62,7 +62,10 @@ export class TransferToHumanUseCase {
       { status: conversation.status, assignedAgentId: conversation.assignedAgentId },
       { type: "TICKET_CREATED" },
     );
-    await this.conversationRepository.update(input.conversationId, { status: nextState.status });
+    await this.conversationRepository.update(input.conversationId, {
+      status: nextState.status,
+      ...(nextState.status === "WAITING_AGENT" ? { assignedAgentId: null } : {}),
+    });
 
     const agent = await this.pickAvailableAgent.execute();
     let assignedAgentId: string | null = null;
@@ -85,6 +88,7 @@ export class TransferToHumanUseCase {
         assignedAgentId: agent.id,
       });
     } else {
+      if (ticket.assignedAgentId !== null) await this.assignTicket.execute(ticket.id, null);
       await this.conversationRepository.recordEvent({
         conversationId: input.conversationId,
         type: "TRANSFERRED_TO_HUMAN",
@@ -96,11 +100,12 @@ export class TransferToHumanUseCase {
         content: "No hay agentes disponibles. Ticket en cola.",
         metadata: { eventType: "TRANSFERRED_TO_HUMAN" },
       });
-      const waitingState = transition(
-        { status: conversation.status, assignedAgentId: conversation.assignedAgentId },
-        { type: "TRANSFERRED_TO_HUMAN" },
-      );
-      await this.conversationRepository.update(input.conversationId, { status: waitingState.status });
+      // TICKET_CREATED ya movió la conversación a WAITING_AGENT. No se debe
+      // volver a transicionar desde la instantánea anterior (por ejemplo OPEN).
+      await this.conversationRepository.update(input.conversationId, {
+        status: "WAITING_AGENT",
+        assignedAgentId: null,
+      });
     }
 
     const messageToCustomer =

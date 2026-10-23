@@ -16,6 +16,7 @@ import type { CompanyRole } from "../../modules/identity/domain/entities/company
 import { DEFAULT_HANDOFF_WAIT_MESSAGE, HANDOFF_TIMEOUT_NOTICE } from "../../shared/config/handoff-messages.js";
 import {
   buildAttentionMenu,
+  buildPqrsAreasMenu,
   DATA_QUERY_REQUEST,
   MENU_COMMAND,
   MENU_LABELS,
@@ -711,6 +712,7 @@ export class ProcessIncomingMessageUseCase {
     if (!isMenuCallbackPayload(raw)) return raw;
     if (!action || action.type === "unknown") return "acción de menú no disponible";
     if (action.type === "home") return "volver al menú";
+    if (action.type === "areas") return "PQRS";
     if (action.type === "area") return `área ${action.area}`;
     if (action.type === "topic") return `tema ${action.topic}`;
     if (action.type === "questions-page") return `página ${action.page + 1}`;
@@ -734,6 +736,7 @@ export class ProcessIncomingMessageUseCase {
   ): Promise<ProcessIncomingMessageResult> {
     if (action.type === "unknown") return this.controlledUnknownCallback(conversationId, "BOT_HANDLING");
     if (action.type === "home") return this.showMenu(conversationId, channel);
+    if (action.type === "areas") return this.showCustomMenu(conversationId, buildPqrsAreasMenu());
     if (action.type === "advisor") return this.handleMenuAction("asesor", userId, conversationId, channel, phone, name);
     if (action.type === "data-menu") return this.showCustomMenu(conversationId, buildDataMenu());
     if (action.type === "data-action") return this.executeDataButton(action.action, userId, conversationId, channel, phone, name);

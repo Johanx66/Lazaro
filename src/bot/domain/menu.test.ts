@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  buildAttentionMenu, buildAreaTopicsMenu, buildTopicQuestionsMenu,
+  buildAttentionMenu, buildPqrsAreasMenu, buildAreaTopicsMenu, buildTopicQuestionsMenu,
   callbackDataValuesForEntries, parseMenuCallback, PQRS_AREAS,
 } from "./menu.js";
 
@@ -11,11 +11,15 @@ const knowledge = JSON.parse(readFileSync(new URL("../../../prisma/data/pqrs_bas
 const entries = knowledge.entradas.map((entry) => ({ id: entry.id, topic: entry.tema, question: entry.pregunta_principal, tool: entry.herramienta ?? null }));
 
 describe("menú Telegram PQRS", () => {
-  it("muestra las siete áreas, datos y asesor en el nivel inicial", () => {
+  it("muestra las tres acciones principales en vertical y las siete áreas en filas completas", () => {
     const menu = buildAttentionMenu();
     expect(PQRS_AREAS).toHaveLength(7);
-    expect(menu.buttons.flat().map(({ label }) => label).join(" ")).toContain("Mis datos");
-    expect(menu.buttons.flat().map(({ label }) => label).join(" ")).toContain("Hablar con un asesor");
+    expect(menu.buttons).toHaveLength(3);
+    expect(menu.buttons.every((row) => row.length === 1)).toBe(true);
+    expect(menu.buttons.flat().map(({ label }) => label)).toEqual(["📋 PQRS", "👤 Mis datos", "👨‍💼 Hablar con un asesor"]);
+    const areas = buildPqrsAreasMenu();
+    expect(areas.buttons).toHaveLength(8);
+    expect(areas.buttons.every((row) => row.length === 1)).toBe(true);
   });
 
   it("navega áreas, temas y páginas con hasta seis preguntas por página", () => {

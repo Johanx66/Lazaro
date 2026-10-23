@@ -84,6 +84,8 @@ describe("callbacks del menú Telegram", () => {
   it("recorre área, tema y página siguiente sin salir al flujo RAG", async () => {
     const list = Array.from({ length: 8 }, (_, index) => ({ id: `pedido.item_${index}`, topic: "pedido", question: `Pregunta ${index}`, tool: null }));
     const processor = useCase({ listPqrsMenuEntries: async () => list });
+    const areas = await processor.execute({ channel: "TELEGRAM", contactId: "tg1", name: "Ana", text: "menu:pqrs" });
+    expect(areas.menu?.buttons).toHaveLength(8);
     const area = await processor.execute({ channel: "TELEGRAM", contactId: "tg1", name: "Ana", text: "menu:area:pedidos" });
     expect(area.menu?.buttons.flat().some(({ callbackData }) => callbackData === "pqrs:topic:pedido")).toBe(true);
     const topic = await processor.execute({ channel: "TELEGRAM", contactId: "tg1", name: "Ana", text: "pqrs:topic:pedido" });
