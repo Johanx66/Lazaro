@@ -6,6 +6,7 @@ import { TelegramAdapter } from "../../channels/infrastructure/telegram-adapter.
 import type { MenuChannelAdapter } from "../../channels/domain/telegram-menu.js";
 import type { HandleInboundMessageUseCase } from "../application/handle-inbound-message.js";
 import type { InboundMessage } from "../../channels/domain/channel-adapter.js";
+import { TelegramMenuApiError } from "../infrastructure/telegram-menu-sender.js";
 
 const SECRET = "s3creto-del-webhook_de-Telegram";
 const SECRET_HEADER = "x-telegram-bot-api-secret-token";
@@ -14,6 +15,18 @@ function makeUpdate(text: string, updateId: number, chatId = 570123456789): unkn
   return {
     update_id: updateId,
     message: { text, chat: { id: chatId, type: "private" }, from: { first_name: "Ana" } },
+  };
+}
+
+function makeCallbackUpdate(updateId: number): unknown {
+  return {
+    update_id: updateId,
+    callback_query: {
+      id: `callback-${updateId}`,
+      data: "menu:home",
+      from: { first_name: "Ana" },
+      message: { message_id: 42, chat: { id: 570123456789, type: "private" } },
+    },
   };
 }
 
@@ -64,6 +77,56 @@ function post(base: string, body: unknown, secret: string | null = SECRET): Prom
 }
 
 describe("telegramWebhookRouter", () => {
+  it("trata Message is not modified como normal, sin warn ni mensaje duplicado", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const menu = { text: "Menú", buttons: [[{ label: "PQRS", callbackData: "pqrs:home" }]] };
+    const execute = vi.fn().mockResolvedValue({ menu });
+    const sendMenu = vi.fn().mockResolvedValue(undefined);
+    const editMenu = vi.fn().mockRejectedValue(new TelegramMenuApiError(400, "Bad Request: message is not modified"));
+    const { app } = makeApp({
+      execute: execute as unknown as (inbound: InboundMessage) => Promise<void>,
+      menuAdapter: { channel: "TELEGRAM", sendMenu, editMenu, answerCallbackQuery: vi.fn().mockResolvedValue(undefined) },
+    });
+    const { server, base } = await start(app);
+    try {
+      const res = await post(base, makeCallbackUpdate(500));
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(editMenu).toHaveBeenCalledOnce();
+      expect(sendMenu).not.toHaveBeenCalled();
+      expect(consoleSpy).not.toHaveBeenCalled();
+    } finally {
+      server.close();
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it.each(["Message is too old", "Bad Request: message to edit not found"])(
+    "envía el menú como mensaje nuevo cuando la edición falla: %s",
+    async (description) => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const menu = { text: "Menú recuperado", buttons: [[{ label: "Volver", callbackData: "menu:home" }]] };
+      const execute = vi.fn().mockResolvedValue({ menu });
+      const sendMenu = vi.fn().mockResolvedValue(undefined);
+      const editMenu = vi.fn().mockRejectedValue(new TelegramMenuApiError(400, description));
+      const { app } = makeApp({
+        execute: execute as unknown as (inbound: InboundMessage) => Promise<void>,
+        menuAdapter: { channel: "TELEGRAM", sendMenu, editMenu, answerCallbackQuery: vi.fn().mockResolvedValue(undefined) },
+      });
+      const { server, base } = await start(app);
+      try {
+        const res = await post(base, makeCallbackUpdate(description.length + 600));
+        expect(res.status, await res.clone().text()).toBe(200);
+        expect(sendMenu).toHaveBeenCalledWith("570123456789", menu);
+        const warning = consoleSpy.mock.calls.map(([entry]) => String(entry)).join("\n");
+        expect(warning).toContain(description);
+        expect(warning).not.toContain("570123456789");
+      } finally {
+        server.close();
+        consoleSpy.mockRestore();
+      }
+    },
+  );
+
   it("acepta un update válido con el secreto correcto y responde 200", async () => {
     const { app, execute } = makeApp();
     const { server, base } = await start(app);

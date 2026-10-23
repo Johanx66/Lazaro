@@ -3,6 +3,16 @@ import type { TelegramMenuSender } from "../domain/telegram.js";
 
 const TELEGRAM_API_URL = "https://api.telegram.org";
 
+export class TelegramMenuApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly description: string,
+  ) {
+    super(`Telegram API error ${status}: ${description}`);
+    this.name = "TelegramMenuApiError";
+  }
+}
+
 /**
  * Construye el `reply_markup` de la Bot API. Sin botones, el teclado se quita.
  */
@@ -42,8 +52,8 @@ export class HttpTelegramMenuSender implements TelegramMenuSender {
   }
 
   /**
-   * Llama a un método de la Bot API. El error solo lleva el código HTTP: nunca
-   * se incluyen el token del bot ni el contenido enviado.
+   * Llama a un método de la Bot API. El error solo expone el código HTTP y la
+   * descripción de Telegram: nunca incluye el token ni el contenido enviado.
    */
   private async call(method: string, payload: Record<string, unknown>): Promise<void> {
     const response = await fetch(`${TELEGRAM_API_URL}/bot${this.botToken}/${method}`, {
@@ -53,7 +63,21 @@ export class HttpTelegramMenuSender implements TelegramMenuSender {
     });
 
     if (!response.ok) {
-      throw new Error(`Telegram API error ${response.status}`);
+      let description = "Telegram API request failed";
+      try {
+        const body: unknown = await response.json();
+        if (
+          body !== null &&
+          typeof body === "object" &&
+          "description" in body &&
+          typeof body.description === "string"
+        ) {
+          description = body.description;
+        }
+      } catch {
+        // La respuesta no era JSON; se mantiene la descripción genérica.
+      }
+      throw new TelegramMenuApiError(response.status, description);
     }
   }
 }

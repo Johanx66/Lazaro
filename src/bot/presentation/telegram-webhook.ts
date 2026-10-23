@@ -10,6 +10,7 @@ import type { MenuChannelAdapter } from "../../channels/domain/telegram-menu.js"
 import { rateLimit } from "../../shared/http/rate-limit.js";
 import type { HandleInboundMessageUseCase } from "../application/handle-inbound-message.js";
 import { menuSelectedText } from "../domain/menu.js";
+import { TelegramMenuApiError } from "../infrastructure/telegram-menu-sender.js";
 
 export interface TelegramWebhookDeps {
   /** secret_token configurado en setWebhook. Vacío => el webhook rechaza todo (401). */
@@ -151,21 +152,39 @@ export function telegramWebhookRouter(deps: TelegramWebhookDeps): Router {
         // Tras elegir una opción, el mensaje del menú se edita para quitar el
         // teclado y dejar constancia de lo elegido.
         if (callback && callback.messageId !== null && (result.menu || result.menuAction) && deps.menuAdapter) {
-          await deps.menuAdapter
-            .editMenu(callback.chatId, callback.messageId, result.menu ?? {
-              text: menuSelectedText(result.menuAction!),
-              buttons: [],
-            })
-            .catch((error: unknown) => {
+          const selectedMenu = result.menu ?? {
+            text: menuSelectedText(result.menuAction!),
+            buttons: [],
+          };
+          try {
+            await deps.menuAdapter.editMenu(callback.chatId, callback.messageId, selectedMenu);
+          } catch (error) {
+            if (isMessageNotModified(error)) {
+              // Telegram ya muestra exactamente el mismo texto y teclado.
+              // Es una respuesta idempotente normal y no requiere aviso.
+            } else {
               console.error(
                 JSON.stringify({
                   level: "warn",
                   msg: "no se pudo editar el menú de Telegram",
-                  chatId: callback.chatId,
-                  error: error instanceof Error ? error.message : String(error),
+                  ...(error instanceof TelegramMenuApiError
+                    ? { description: error.description }
+                    : { description: "Error inesperado al editar el menú" }),
                 }),
               );
-            });
+              await deps.menuAdapter.sendMenu(callback.chatId, selectedMenu).catch((sendError: unknown) => {
+                console.error(
+                  JSON.stringify({
+                    level: "warn",
+                    msg: "no se pudo enviar un menú nuevo de Telegram",
+                    ...(sendError instanceof TelegramMenuApiError
+                      ? { description: sendError.description }
+                      : { description: "Error inesperado al enviar el menú" }),
+                  }),
+                );
+              });
+            }
+          }
         }
         if (updateId !== null) dedupe.add(updateId);
         res.status(200).json({ status: "ok" });
@@ -200,4 +219,8 @@ export function telegramWebhookRouter(deps: TelegramWebhookDeps): Router {
   );
 
   return router;
+}
+
+function isMessageNotModified(error: unknown): boolean {
+  return error instanceof TelegramMenuApiError && /message is not modified/i.test(error.description);
 }
