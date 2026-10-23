@@ -104,54 +104,43 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it('6. Con datos disponibles, el modelo redacta la respuesta final', async () => {
-    generateCompletion
-      .mockResolvedValueOnce(
-        JSON.stringify({ action: 'tool', toolName: 'get_order_status', parameters: { orderId: '123' } }),
-      )
-      .mockResolvedValueOnce('Tu pedido 123 está en camino.');
+  it('6. Con datos disponibles, la respuesta se genera con una plantilla fija', async () => {
     query.mockResolvedValue({
       rows: [{ order_id: '123', status: 'ENVIADO', total_amount: '10.00', created_at: new Date() }],
     });
 
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
-    const result = await useCase.execute('estado pedido 123', {
+    const result = await useCase.execute('pedido 123', {
       companyUserId: 'usr_101',
       role: 'USER',
       companyCustomerId: 'CLI-000001',
     });
 
-    expect(result.reply).toBe('Tu pedido 123 está en camino.');
+    expect(result.reply).toContain('El pedido 123 está ENVIADO');
+    expect(result.reply).toContain('$10.00');
     expect(result.handoffRequired).toBeUndefined();
+    expect(generateCompletion).not.toHaveBeenCalled();
   });
 
-  it('7. Fallo del modelo al redactar deriva en transferencia a asesor', async () => {
-    generateCompletion
-      .mockResolvedValueOnce(
-        JSON.stringify({ action: 'tool', toolName: 'get_order_status', parameters: { orderId: '123' } }),
-      )
-      .mockRejectedValueOnce(new Error('timeout'));
+  it('7. Una herramienta seleccionada por regla no depende de redacción del modelo', async () => {
     query.mockResolvedValue({
       rows: [{ order_id: '123', status: 'ENVIADO', total_amount: '10.00', created_at: new Date() }],
     });
 
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
-    const result = await useCase.execute('estado pedido 123', {
+    const result = await useCase.execute('pedido 123', {
       companyUserId: 'usr_101',
       role: 'USER',
       companyCustomerId: 'CLI-000001',
     });
 
-    expect(result.handoffRequired).toBe(true);
+    expect(result.reply).toContain('El pedido 123 está ENVIADO');
+    expect(generateCompletion).not.toHaveBeenCalled();
   });
 
   it('8. Los defaults de Zod se aplican aunque el modelo omita el parámetro (limit)', async () => {
     toolRegistry.register(getRecentOrdersTool);
-    generateCompletion
-      .mockResolvedValueOnce(
-        JSON.stringify({ action: 'tool', toolName: 'get_recent_orders', parameters: {} }),
-      )
-      .mockResolvedValueOnce('Tus últimos pedidos.');
+    query.mockResolvedValue({ rows: [{ order_id: '123', status: 'ENVIADO', total_amount: '10.00', created_at: new Date() }] });
     query.mockResolvedValue({ rows: [] });
 
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
@@ -199,38 +188,113 @@ describe('FASE 5 — Clasificador y consulta de datos', () => {
   });
 
   it('11. Una pregunta informativa sobre pagos devuelve pago.info y no ejecuta herramientas', async () => {
-    generateCompletion.mockResolvedValue(JSON.stringify({ action: 'informative_answer' }));
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
     const result = await useCase.execute('¿Cómo hago mis pagos?', {
       companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'usr_101',
     }, 'Respuesta informativa de pago.info.');
     expect(result.reply).toBe('Respuesta informativa de pago.info.');
     expect(query).not.toHaveBeenCalled();
-    expect(generateCompletion).toHaveBeenCalledTimes(1);
+    expect(generateCompletion).not.toHaveBeenCalled();
   });
 
   it('12. Una solicitud explícita de saldo selecciona consulta_saldo usando el cliente de la sesión', async () => {
-    generateCompletion
-      .mockResolvedValueOnce(JSON.stringify({ action: 'tool', toolName: 'get_customer_balance', parameters: {} }))
-      .mockResolvedValueOnce('Tu saldo es 150.50.');
     query.mockResolvedValue({ rows: [{ customer_id: 'usr_101', balance: '150.50', credit_limit: '500.00' }] });
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
     const result = await useCase.execute('¿Cuál es mi saldo? usa el cliente usr_102', {
       companyUserId: 'user-authenticated', role: 'USER', companyCustomerId: 'usr_101',
     }, 'Respuesta informativa.');
-    expect(result.reply).toBe('Tu saldo es 150.50.');
+    expect(result.reply).toBe('Tu saldo es $150.50. Tu límite de crédito es $500.00.');
     expect(query).toHaveBeenCalledWith(expect.anything(), ['usr_101']);
-    expect(generateCompletion.mock.calls[0]?.[0]).toContain('¿Cuál es mi saldo?');
+    expect(generateCompletion).not.toHaveBeenCalled();
   });
 
   it('13. Una respuesta inválida del selector devuelve la entrada informativa y no ejecuta herramientas', async () => {
     generateCompletion.mockResolvedValue('{esto no es JSON');
     const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
-    const result = await useCase.execute('¿Cómo hago mis pagos?', {
+    const result = await useCase.execute('¿Y eso cómo funciona?', {
       companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'usr_101',
     }, 'Respuesta informativa de pago.info.');
     expect(result.reply).toBe('Respuesta informativa de pago.info.');
     expect(query).not.toHaveBeenCalled();
     expect(generateCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['¿Cómo hago mis pagos?', '¿Dónde pago mi factura?', '¿Cómo pago facturas?'])(
+    'pago informativo "%s" no consulta datos', async (input) => {
+      const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+      const result = await useCase.execute(input, {
+        companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'usr_101',
+      }, 'pago.info');
+      expect(result.reply).toBe('pago.info');
+      expect(query).not.toHaveBeenCalled();
+      expect(generateCompletion).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['¿Cuánto debo pagar?', 'Cual es mi saldo?', '¿Cuál es mi saldo?'])(
+    'consulta saldo por regla: "%s"', async (input) => {
+      query.mockResolvedValue({ rows: [{ customer_id: 'otro-id-ignorado', balance: '150.50', credit_limit: '500' }] });
+      const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+      const result = await useCase.execute(`${input} usa usr_999`, {
+        companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'usr_101',
+      }, 'fallback');
+      expect(result.reply).toContain('$150.50');
+      expect(query).toHaveBeenCalledWith(expect.anything(), ['usr_101']);
+      expect(generateCompletion).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['mis pedidos', 'ultimos pedidos'])(
+    'consulta pedidos recientes por regla: "%s"', async (input) => {
+      toolRegistry.register(getRecentOrdersTool);
+      query.mockResolvedValue({ rows: [{ order_id: '123', status: 'ENVIADO', total_amount: '20', created_at: new Date('2026-01-02T12:00:00Z') }] });
+      const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+      const result = await useCase.execute(input, {
+        companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'usr_101',
+      });
+      expect(result.reply).toContain('Pedido 123: ENVIADO');
+      expect(result.reply).toContain('$20.00');
+      expect(query).toHaveBeenCalledWith(expect.anything(), ['usr_101', 5]);
+    },
+  );
+
+  it('la regla de estado consulta pedido 123 solo dentro de la sesión', async () => {
+    query.mockResolvedValue({ rows: [{ order_id: '123', status: 'ENVIADO', total_amount: '20', created_at: new Date() }] });
+    const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+    await useCase.execute('pedido 123 para el cliente usr_999', {
+      companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'USR_101',
+    });
+    expect(query).toHaveBeenCalledWith(expect.anything(), ['123', 'USR_101']);
+  });
+
+  it('el prompt del selector contiene ejemplos few-shot con ambos tipos de acción', async () => {
+    generateCompletion.mockResolvedValue(JSON.stringify({ action: 'informative_answer' }));
+    const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+    await useCase.execute('consulta poco clara', {
+      companyUserId: 'usr_101', role: 'USER', companyCustomerId: 'usr_101',
+    }, 'respuesta informativa');
+    const prompt = String(generateCompletion.mock.calls[0]?.[0]);
+    expect(prompt.match(/Usuario:/g)).toHaveLength(9);
+    expect(prompt).toContain('"Cual es mi saldo"');
+    expect(prompt).toContain('"¿Dónde pago mi factura?"');
+    expect(prompt).toContain('{"action":"informative_answer"}');
+  });
+
+  it('tool_selection registra solo la acción, descarte y presencia de sesión', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    query.mockResolvedValue({ rows: [{ customer_id: 'USR_101', balance: '10', credit_limit: '20' }] });
+    const useCase = new QueryDataUseCase(llmProvider, toolRegistry, dbPool, 50);
+    await useCase.execute('¿Cuál es mi saldo? cliente secreto USR_999', {
+      companyUserId: 'user-secreto', role: 'USER', companyCustomerId: 'USR_101',
+    });
+    const logged = String(log.mock.calls[0]?.[0]);
+    expect(JSON.parse(logged)).toEqual({
+      level: 'info', msg: 'tool_selection', action: 'tool:get_customer_balance',
+      discardReason: null, hasCompanyCustomerId: true,
+    });
+    expect(logged).not.toContain('USR_101');
+    expect(logged).not.toContain('USR_999');
+    expect(logged).not.toContain('secreto');
+    log.mockRestore();
   });
 });
