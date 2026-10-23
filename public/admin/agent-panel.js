@@ -328,6 +328,7 @@
     state.currentConversationId = conv.id;
     state.currentConversation = conv;
     state.messagesCursor = null;
+    $("messagesContainer").innerHTML = "";
 
     $("waitingListContainer").hidden = true;
     $("historyListContainer").hidden = true;
@@ -363,8 +364,12 @@
     }
   }
 
-  async function loadMessages() {
+  async function loadMessages(reset) {
     var container = $("messagesContainer");
+    if (reset) {
+      state.messagesCursor = null;
+      container.innerHTML = "";
+    }
     var loading = document.createElement("div");
     loading.className = "loading";
     loading.textContent = "Cargando mensajes...";
@@ -458,7 +463,7 @@
         return;
       }
       $("replyText").value = "";
-      await loadMessages();
+      await loadMessages(true);
       checkWhatsAppWindow(conv);
     } catch (e) {
       var msg = errorText(e);
