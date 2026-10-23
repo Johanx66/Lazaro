@@ -20,6 +20,7 @@
     "prisma:seed": "prisma db seed",
     "kb:import": "tsx prisma/import-kb.ts",
     "rag:eval": "tsx scripts/rag-eval.ts",
+    "pqrs:examples:verify": "tsx scripts/verify-pqrs-menu-examples.ts",
     "db:local": "tsx scripts/pglite.ts",
     "dev:all": "node scripts/dev-local.mjs",
     "postinstall": "prisma generate"

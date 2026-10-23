@@ -177,10 +177,14 @@ export function telegramWebhookRouter(deps: TelegramWebhookDeps): Router {
             errorName: error instanceof Error ? error.name : "UnknownError",
           }),
         );
-        await deps.adapter.send(inbound.contactId, {
-          text: "Lo siento, ocurrió un problema al procesar tu mensaje. Inténtalo de nuevo o escribe «menú» para ver las opciones.",
-          sender: "BOT",
-        }).catch((sendError: unknown) => {
+        const errorReply = "Lo siento, ocurrió un problema al procesar tu mensaje. Inténtalo de nuevo o escribe «menú» para ver las opciones.";
+        const notifyCustomer = deps.menuAdapter
+          ? deps.menuAdapter.sendMenu(inbound.contactId, {
+              text: errorReply,
+              buttons: [[{ label: "🔙 Volver al menú", callbackData: "menu:home" }]],
+            })
+          : deps.adapter.send(inbound.contactId, { text: errorReply, sender: "BOT" });
+        await notifyCustomer.catch((sendError: unknown) => {
           console.error(
             JSON.stringify({
               level: "warn",

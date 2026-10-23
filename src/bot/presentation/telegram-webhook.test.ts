@@ -3,6 +3,7 @@ import express from "express";
 import type { Server } from "http";
 import { telegramWebhookRouter } from "./telegram-webhook.js";
 import { TelegramAdapter } from "../../channels/infrastructure/telegram-adapter.js";
+import type { MenuChannelAdapter } from "../../channels/domain/telegram-menu.js";
 import type { HandleInboundMessageUseCase } from "../application/handle-inbound-message.js";
 import type { InboundMessage } from "../../channels/domain/channel-adapter.js";
 
@@ -19,6 +20,7 @@ function makeUpdate(text: string, updateId: number, chatId = 570123456789): unkn
 interface Options {
   secret?: string;
   execute?: (inbound: InboundMessage) => Promise<void>;
+  menuAdapter?: MenuChannelAdapter;
 }
 
 function makeApp(options: Options = {}) {
@@ -35,6 +37,7 @@ function makeApp(options: Options = {}) {
       secretToken: options.secret ?? SECRET,
       adapter,
       handleInbound,
+      ...(options.menuAdapter ? { menuAdapter: options.menuAdapter } : {}),
     }),
   );
   return { app, execute: execute as ReturnType<typeof vi.fn>, sendText };
@@ -165,16 +168,21 @@ describe("telegramWebhookRouter", () => {
         .fn()
         .mockRejectedValueOnce(new Error("fallo transitorio"))
         .mockResolvedValueOnce(undefined);
-      const { app, sendText } = makeApp({ execute: execute as unknown as (inbound: InboundMessage) => Promise<void> });
+      const sendMenu = vi.fn().mockResolvedValue(undefined);
+      const { app, sendText } = makeApp({
+        execute: execute as unknown as (inbound: InboundMessage) => Promise<void>,
+        menuAdapter: { channel: "TELEGRAM", sendMenu, editMenu: vi.fn(), answerCallbackQuery: vi.fn() },
+      });
       const { server, base } = await start(app);
       try {
         const first = await post(base, makeUpdate("hola", 11));
         expect(first.status).toBe(200);
         expect(await first.json()).toEqual({ status: "ok" });
-        expect(sendText).toHaveBeenCalledWith(
-          "570123456789",
-          expect.stringContaining("ocurrió un problema al procesar tu mensaje"),
-        );
+        expect(sendMenu).toHaveBeenCalledWith("570123456789", expect.objectContaining({
+          text: expect.stringContaining("ocurrió un problema al procesar tu mensaje"),
+          buttons: [[{ label: "🔙 Volver al menú", callbackData: "menu:home" }]],
+        }));
+        expect(sendText).not.toHaveBeenCalled();
 
         const retry = await post(base, makeUpdate("hola", 11));
         expect(retry.status).toBe(200);

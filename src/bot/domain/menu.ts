@@ -1,4 +1,5 @@
 import type { TelegramInlineButton, TelegramMenu } from "../../channels/domain/telegram-menu.js";
+import { PQRS_TOPIC_EXAMPLES } from "./pqrs-topic-examples.js";
 
 export type MenuAction = "pqrs" | "datos" | "asesor";
 export const MENU_ACTIONS: readonly MenuAction[] = ["pqrs", "datos", "asesor"];
@@ -87,12 +88,13 @@ export function buildAttentionMenu(): TelegramMenu {
     action === "pqrs" ? "📋 PQRS" : action === "datos" ? "👤 Mis datos" : "👨‍💼 Hablar con un asesor",
     MENU_CALLBACK_DATA[action],
   ));
+  buttons.push(button("🏠 Volver al menú", "menu:home"));
   return { text: ATTENTION_MENU_TEXT, buttons: buttons.map((item) => [item]) };
 }
 
 export function buildPqrsAreasMenu(): TelegramMenu {
   const buttons = PQRS_AREAS.map((area) => button(area.label, `menu:area:${area.id}`));
-  buttons.push(button("🔙 Volver al menú", "pqrs:home"));
+  buttons.push(button("🔙 Volver al menú", "menu:home"));
   // Las etiquetas de las áreas son largas; una por fila evita truncarlas en móvil.
   return { text: "PQRS. Elige un área:", buttons: buttons.map((item) => [item]) };
 }
@@ -102,6 +104,7 @@ export function buildAreaTopicsMenu(areaId: PqrsAreaId): TelegramMenu {
   if (!area) return buildAttentionMenu();
   const buttons = area.topics.map((topic) => button(PQRS_TOPIC_LABELS[topic] ?? topic, `pqrs:topic:${topic}`));
   buttons.push(button("🔙 Volver a áreas", "menu:pqrs"));
+  buttons.push(button("🏠 Volver al menú", "menu:home"));
   return { text: `${area.label}\nElige un tema:`, buttons: inlineRows(buttons) };
 }
 
@@ -120,19 +123,38 @@ export function buildTopicQuestionsMenu(
   if (safePage > 0) navigation.push(button("⬅️ Anterior", `pqrs:page:${topic}:${safePage - 1}`));
   if (safePage < lastPage) navigation.push(button("Siguiente ➡️", `pqrs:page:${topic}:${safePage + 1}`));
   navigation.push(button("🔙 Volver", `pqrs:area:${areaId}`));
+  navigation.push(button("🏠 Volver al menú", "menu:home"));
   return {
     text: matching.length === 0
-      ? `${PQRS_TOPIC_LABELS[topic] ?? topic}\nAún no hay preguntas disponibles en este tema. Puedes escribir tu consulta.`
-      : `${PQRS_TOPIC_LABELS[topic] ?? topic} (página ${safePage + 1} de ${lastPage + 1})\nElige una pregunta:`,
+      ? `${PQRS_TOPIC_LABELS[topic] ?? topic}\nAún no hay preguntas disponibles en este tema. Puedes escribir tu consulta.\n\nPuedes tocar una pregunta o escribirme con tus palabras.`
+      : buildTopicPrompt(topic, safePage, lastPage),
     buttons: [...inlineRows(buttons), ...inlineRows(navigation)],
   };
+}
+
+export function buildPqrsAnswerMenu(topic: string, text: string): TelegramMenu {
+  return {
+    text,
+    buttons: [
+      [button("🔙 Volver", `pqrs:topic:${topic}`)],
+      [button("🏠 Volver al menú", "menu:home")],
+    ],
+  };
+}
+
+function buildTopicPrompt(topic: string, page: number, lastPage: number): string {
+  const examples = PQRS_TOPIC_EXAMPLES[topic] ?? [];
+  const examplesText = examples.length > 0
+    ? ` Por ejemplo: ${examples.map((example) => `«${example}»`).join("; ")}.`
+    : "";
+  return `${PQRS_TOPIC_LABELS[topic] ?? topic} (página ${page + 1} de ${lastPage + 1})\nElige una pregunta o escríbeme con tus palabras.${examplesText}`;
 }
 
 export function buildDataMenu(only?: DataMenuAction): TelegramMenu {
   const buttons: TelegramInlineButton[] = [];
   if (!only || only === "balance") buttons.push(button("💰 Mi saldo", "data:balance"));
   if (!only || only === "orders") buttons.push(button("📦 Mis pedidos", "data:orders"));
-  buttons.push(button("🔙 Volver al menú", "pqrs:home"));
+  buttons.push(button("🔙 Volver al menú", "menu:home"));
   return { text: "Mis datos. Elige qué quieres consultar:", buttons: inlineRows(buttons) };
 }
 
@@ -198,13 +220,21 @@ export function menuActionForCallback(callback: MenuCallback): MenuAction | unde
 }
 
 export function callbackDataValuesForEntries(entries: readonly MenuKnowledgeEntry[]): string[] {
+  const topicCounts = new Map<string, number>();
+  for (const entry of entries) topicCounts.set(entry.topic, (topicCounts.get(entry.topic) ?? 0) + 1);
+  const topicPages = [...topicCounts].flatMap(([topic, count]) => {
+    const lastPage = Math.max(0, Math.ceil(count / MAX_QUESTIONS_PER_PAGE) - 1);
+    return [
+      `pqrs:topic:${topic}`,
+      ...Array.from({ length: lastPage + 1 }, (_, page) => `pqrs:page:${topic}:${page}`),
+    ];
+  });
   return [
     ...Object.values(MENU_CALLBACK_DATA),
     ...PQRS_AREAS.map(({ id }) => `menu:area:${id}`),
-    ...PQRS_AREAS.flatMap(({ topics }) => topics.flatMap((topic) => [
-      `pqrs:topic:${topic}`, `pqrs:page:${topic}:0`, `pqrs:page:${topic}:1`,
-    ])),
+    ...PQRS_AREAS.map(({ id }) => `pqrs:area:${id}`),
+    ...topicPages,
     ...entries.map(({ id }) => `pqrs:entry:${id}`),
-    "handoff:back", "pqrs:home", "data:balance", "data:orders",
+    "handoff:back", "pqrs:home", "menu:home", "data:balance", "data:orders",
   ];
 }

@@ -54,6 +54,16 @@ describe("callbacks del menú Telegram", () => {
     expect(ragFind).not.toHaveBeenCalled();
   });
 
+  it("menu:home abre el nivel principal sin llegar al RAG", async () => {
+    const findAnswer = vi.fn(async () => null);
+    const ragFind = vi.fn(async () => null);
+    const processor = useCase({ knowledge: { findAnswer }, rag: { find: ragFind }, ragEnabled: true });
+    const result = await processor.execute({ channel: "TELEGRAM", contactId: "tg1", name: "Ana", text: "menu:home" });
+    expect(result.menu?.buttons.flat().map(({ callbackData }) => callbackData)).toContain("menu:home");
+    expect(findAnswer).not.toHaveBeenCalled();
+    expect(ragFind).not.toHaveBeenCalled();
+  });
+
   it("una selección de pregunta obtiene la entrada y reemplaza placeholders", async () => {
     const get = vi.fn(async () => knowledgeEntry());
     const processor = useCase({ getPqrsMenuEntry: get, menuPlaceholders: { companyName: "Empresa", officialChannel: "canal", conditionsUrl: "https://example.test/condiciones" } });
@@ -61,6 +71,9 @@ describe("callbacks del menú Telegram", () => {
     expect(get).toHaveBeenCalledWith("pedido.info");
     expect(result.reply).toContain("https://example.test/condiciones");
     expect(result.reply).not.toMatch(/\{\{[^}]+\}\}/u);
+    expect(result.menu?.buttons.flat().map(({ callbackData }) => callbackData)).toEqual([
+      "pqrs:topic:pedido", "menu:home",
+    ]);
   });
 
   it.each([

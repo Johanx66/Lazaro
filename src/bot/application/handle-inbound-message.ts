@@ -5,6 +5,8 @@ import type { MenuChannelAdapter } from "../../channels/domain/telegram-menu.js"
 import type { MessageProcessor, ProcessIncomingMessageResult } from "./message-processor.js";
 import { isMenuCallbackPayload } from "../domain/menu.js";
 
+const MENU_HOME_BUTTON = { label: "🔙 Volver al menú", callbackData: "menu:home" };
+
 export interface HandleInboundMessageDeps {
   processor: MessageProcessor;
   adapter: ChannelAdapter;
@@ -20,11 +22,28 @@ export class HandleInboundMessageUseCase {
   constructor(private readonly deps: HandleInboundMessageDeps) {}
 
   async execute(inbound: InboundMessage): Promise<ProcessIncomingMessageResult> {
-    const result = await this.deps.processor.execute(inbound);
-    const handoffMenu = (result.status === "WAITING_AGENT" || result.status === "OPEN") && result.reply
+    const processed = await this.deps.processor.execute(inbound);
+    // OPEN identifica una conversación asignada/en atención por un asesor.
+    // En ese estado no se agrega navegación que pudiera interrumpirla.
+    const result = inbound.channel === "TELEGRAM" && processed.status !== "OPEN"
+      ? {
+          ...processed,
+          ...(processed.menu
+            ? { menu: withMenuHome(processed.menu, processed.status) }
+            : processed.reply
+              ? { menu: {
+                  text: processed.reply,
+                  buttons: processed.status === "WAITING_AGENT"
+                    ? [[{ label: "🔙 Volver al menú", callbackData: "handoff:back" }], [MENU_HOME_BUTTON]]
+                    : [[MENU_HOME_BUTTON]],
+                } }
+              : {}),
+        }
+      : processed;
+    const handoffMenu = result.status === "WAITING_AGENT" && result.reply
       ? {
           text: result.reply,
-          buttons: [[{ label: "🔙 Volver al menú", callbackData: "handoff:back" }]],
+          buttons: [[{ label: "🔙 Volver al menú", callbackData: "handoff:back" }], [MENU_HOME_BUTTON]],
         }
       : null;
     const editingExistingMenu = inbound.channel === "TELEGRAM" && isMenuCallbackPayload(inbound.text) && result.menu !== undefined;
@@ -69,4 +88,17 @@ export class HandleInboundMessageUseCase {
     }
     return result;
   }
+}
+
+function withMenuHome(
+  menu: NonNullable<ProcessIncomingMessageResult["menu"]>,
+  status: ProcessIncomingMessageResult["status"],
+): NonNullable<ProcessIncomingMessageResult["menu"]> {
+  const callbacks = new Set(menu.buttons.flat().map(({ callbackData }) => callbackData));
+  const buttons = [...menu.buttons];
+  if (status === "WAITING_AGENT" && !callbacks.has("handoff:back")) {
+    buttons.push([{ label: "🔙 Cancelar espera", callbackData: "handoff:back" }]);
+  }
+  if (!callbacks.has(MENU_HOME_BUTTON.callbackData)) buttons.push([MENU_HOME_BUTTON]);
+  return { ...menu, buttons };
 }

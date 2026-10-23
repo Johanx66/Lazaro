@@ -17,6 +17,7 @@ import { DEFAULT_HANDOFF_WAIT_MESSAGE, HANDOFF_TIMEOUT_NOTICE } from "../../shar
 import {
   buildAttentionMenu,
   buildPqrsAreasMenu,
+  buildPqrsAnswerMenu,
   DATA_QUERY_REQUEST,
   MENU_COMMAND,
   MENU_LABELS,
@@ -337,11 +338,19 @@ export class ProcessIncomingMessageUseCase {
         if (agentHasReplied) {
           return { conversationId: conversation.id, reply: null, handledByBot: false, status: sent.status };
         }
-        const reminder = HANDOFF_REMINDER;
-        const alreadyReminded = await handoff.hasReminder(conversation.id, startedAt, reminder);
-        if (!alreadyReminded) {
-          await handoff.sendReminder(conversation.id, reminder);
-          return { conversationId: conversation.id, reply: reminder, handledByBot: true, status: sent.status };
+        if (callbackLike && callbackAction && callbackAction.type !== "unknown") {
+          // Elegir una acción del teclado equivale a salir de la espera y
+          // retomar el control del bot; handoff:back mantiene su atajo.
+          await handoff.cancel(conversation.id);
+          returnedToBotWithoutTicket = true;
+        }
+        if (!returnedToBotWithoutTicket) {
+          const reminder = HANDOFF_REMINDER;
+          const alreadyReminded = await handoff.hasReminder(conversation.id, startedAt, reminder);
+          if (!alreadyReminded) {
+            await handoff.sendReminder(conversation.id, reminder);
+            return { conversationId: conversation.id, reply: reminder, handledByBot: true, status: sent.status };
+          }
         }
       }
     }
@@ -760,7 +769,11 @@ export class ProcessIncomingMessageUseCase {
       }
       const safeEntry = { ...entry, answer: this.cleanMenuText(entry.answer), question: this.cleanMenuText(entry.question), confirmationQuestion: entry.confirmationQuestion ? this.cleanMenuText(entry.confirmationQuestion) : null };
       const result = await this.replyWithRagEntry(safeEntry, 1, 0, conversationId, userId, channel, phone, name, safeEntry.question);
-      return { ...result, menuAction: "pqrs" };
+      return {
+        ...result,
+        menuAction: "pqrs",
+        menu: buildPqrsAnswerMenu(safeEntry.topic, result.reply ?? ""),
+      };
     }
     return this.controlledUnknownCallback(conversationId, "BOT_HANDLING");
   }
