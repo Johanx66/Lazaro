@@ -8,11 +8,11 @@ Reglas: ver `AGENTS.md`. Se trabaja UNA fase a la vez.
 
 ## Estado
 
-**Fase ACTUAL: 12 — Continuidad del contexto conversacional.** Render ya está
-conectado y el dueño confirma que el despliegue y el flujo por Telegram funcionan.
-La Fase 11 está operativa; para cerrarla formalmente falta registrar la salida literal
-de typecheck y tests. La Fase 9 sigue bloqueada por decisiones funcionales del dueño;
-no es trabajo activo. Railway se conserva como antecedente histórico.
+**Fase 12 — Aviso de transferencia a asesor: COMPLETADA.** No se marca otra fase
+como ACTUAL hasta que el dueño confirme cuál sigue. Render ya está conectado y el
+dueño confirma que el despliegue y el flujo por Telegram funcionan. La Fase 11 sigue
+operativa, pendiente de su cierre formal. La Fase 9 está bloqueada por decisiones
+funcionales del dueño. Railway se conserva como antecedente histórico.
 
 | Fase | Contenido | Estado |
 |---|---|---|
@@ -28,7 +28,7 @@ no es trabajo activo. Railway se conserva como antecedente histórico.
 | 9 | Puerta de verificación obligatoria (todo contacto sin sesión recibe el mensaje estático y el enlace; cero IA) | **BLOQUEADA** — implementación y revisión hechas; faltan decisiones funcionales del dueño (rol ADMIN en el chat, PQRS en el chat y configuración de Telegram) |
 | 10 | Recuperar despliegue en Railway (histórico; no retomado) | **EN ESPERA** — se decidió pasar a Render |
 | 11 | Despliegue en Render (Blueprint) | **OPERATIVA** — el dueño confirma que está conectada y probada; falta registrar la salida literal de typecheck y tests para el cierre formal |
-| 12 | Continuidad del contexto conversacional | **ACTUAL** — investigar por qué el bot a veces olvida mensajes anteriores de la misma conversación |
+| 12 | Aviso de transferencia a asesor | **COMPLETADA** — aviso explícito por el canal de origen; typecheck y 566 tests pasan. Falta desplegar esta versión y comprobarlo manualmente en Render |
 
 Nota: todavía no hay número de WhatsApp. Todo se desarrolla y prueba con el chat web
 simulado. WhatsApp se conecta al final como un adaptador más.
@@ -449,25 +449,23 @@ un uso estable; sin secretos en el repositorio ni en los logs.
 
 ---
 
-## FASE 12 — Continuidad del contexto conversacional (ACTUAL)
+## FASE 12 — Aviso de transferencia a asesor (COMPLETADA)
 
-Problema reportado: a veces el bot pierde el contexto de mensajes anteriores de la
-misma conversación. El despliegue en Render y el flujo por Telegram ya funcionan;
-esta fase se centra en investigar y corregir la continuidad conversacional, no en
-volver a configurar el despliegue.
+Hecho:
+1. El mensaje de transferencia anuncia explícitamente que la conversación fue
+   transferida y que un asesor responderá por el mismo chat.
+2. El flujo común cubre las transferencias del bot y las que el proyecto inicia al
+   detectar que debe escalar; se conservan los adaptadores y controles de cada canal.
+3. La espera posterior usa un recordatorio distinto y no vuelve a enviar el aviso de
+   transferencia inicial.
+4. Pruebas del envío por WEB, WhatsApp y Telegram y del flujo web, además de los
+   tests de transferencia y espera. Detalle y salidas literales en `AUDIT.md` →
+   "Fase 12 — Aviso de transferencia a asesor".
 
-1. Reproducir el problema con conversaciones de prueba y datos ficticios. Registrar
-   los mensajes previos, la pregunta de seguimiento y qué respuesta se esperaba y se
-   recibió; no guardar prompts, respuestas sensibles ni datos reales en logs.
-2. Seguir el recorrido de esos mensajes para identificar dónde se pierde el contexto
-   (lectura del historial, asociación a la conversación, construcción del contexto
-   enviado al modelo u otra causa observada). No asumir la causa antes de reproducirla.
-3. Corregir la causa identificada con un cambio acotado y añadir tests que verifiquen
-   que una pregunta de seguimiento puede usar mensajes previos de la misma conversación.
-4. Verificar también que mensajes de otra conversación no se incorporan al contexto y
-   que los flujos existentes de FAQ, sesión y transferencia a asesor siguen funcionando.
+Pendiente: desplegar esta versión en Render y comprobar manualmente el aviso en
+Telegram. La posible falta de datos para responder es un tema distinto, fuera de
+esta fase.
 
-**Criterio:** en una conversación de prueba, el bot responde correctamente a una
-pregunta que depende de mensajes anteriores; el contexto no se mezcla entre
-conversaciones y los flujos existentes no se regresionan. Ejecutar y mostrar la
-salida literal de `npm run typecheck` y `npm test`.
+**Criterio cumplido en pruebas:** el aviso explícito sale antes de la primera
+respuesta humana por el canal de origen; los tests de typecheck y la suite completa
+pasan.

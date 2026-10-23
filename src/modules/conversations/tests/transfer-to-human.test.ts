@@ -140,7 +140,7 @@ describe("TransferToHumanUseCase", () => {
       ticketId: "t1",
       assignedAgentId: "a1",
       status: "OPEN",
-      messageToCustomer: "Un agente te atenderá en breve.",
+      messageToCustomer: "Tu conversación fue transferida a un asesor. Te responderá por este chat en cuanto esté disponible.",
     });
     expect(store.get("c1")?.status).toBe("OPEN");
     expect(store.get("c1")?.assignedAgentId).toBe("a1");
@@ -154,7 +154,7 @@ describe("TransferToHumanUseCase", () => {
     expect(result).toMatchObject({
       assignedAgentId: null,
       status: "WAITING_AGENT",
-      messageToCustomer: "Todos los agentes están ocupados. Tu solicitud está en cola y te atenderán en orden de llegada.",
+      messageToCustomer: "Tu conversación fue transferida a un asesor. Te responderá por este chat en cuanto esté disponible. Tu solicitud está en cola y será atendida en orden de llegada.",
     });
     expect(store.get("c1")?.status).toBe("WAITING_AGENT");
     expect(events.map((e) => e.type)).toEqual(["TICKET_CREATED", "TRANSFERRED_TO_HUMAN"]);

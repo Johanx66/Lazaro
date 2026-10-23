@@ -1200,3 +1200,62 @@ Se añadió por eso una columna propia y única en `company_users`.
 - Sigue pendiente del dueño: la carga de la BD de prueba en el segundo servicio
   Postgres de Railway (el `COMPANY_DATABASE_URL` concreto) y la decisión de qué
   cuentas de la demo quedan vinculadas a qué `CLI-XXXXXX`.
+
+## Fase 12 — Aviso de transferencia a asesor
+
+Fecha: 2026-10-23.
+
+### Qué se hizo
+
+1. El mensaje de espera ahora informa explícitamente: «Tu conversación fue
+   transferida a un asesor. Te responderá por este chat en cuanto esté disponible».
+   Se actualizó el valor por defecto y el ejemplo `HANDOFF_WAIT_MESSAGE`.
+2. El flujo común de transferencia usa el mismo aviso tanto con agente asignado como
+   cuando el caso queda en cola. Se mantiene la entrega por el canal de origen; en
+   Telegram el aviso conserva el envío con menú y controles de espera existentes.
+3. La espera posterior conserva su recordatorio independiente y no vuelve a anunciar
+   una transferencia nueva. No se modificó la base de conocimiento ni la lógica de
+   respuesta del bot.
+4. Se añadieron/ajustaron pruebas para verificar aviso antes de la respuesta del
+   asesor en WEB, WhatsApp y Telegram, recordatorio sin repetir el aviso, mensaje de
+   cola y entrega del aviso en el flujo real del chat web.
+
+### Cómo probarlo
+
+- `npm run typecheck`
+- `npm test`
+- Prueba manual tras desplegar: desde cada canal habilitado, solicitar un asesor o
+  provocar una transferencia; comprobar que llega el aviso explícito. Enviar después
+  un mensaje desde el panel y comprobar que el aviso precede a la respuesta humana.
+
+### Verificación (salida literal)
+
+`npm run typecheck`:
+
+```text
+> chatbot-soporte-backend@0.1.0 typecheck
+> tsc -p tsconfig.build.json --noEmit
+```
+
+`npm test`:
+
+```text
+> chatbot-soporte-backend@0.1.0 test
+> vitest run
+
+
+ RUN  v5.0.1 D:/LazaroV2/Lazaro
+
+
+ Test Files  70 passed (70)
+      Tests  566 passed (566)
+   Start at  09:24:43
+   Duration  82.64s (tests 59%, transform 22%, import 18%, worker 1%)
+
+    Isolate  70 workers spawned · ~848ms startup each (spawn + environment, per file)
+             at least ~18.94s faster with isolate: false — reuses workers across files instead of one per file
+```
+
+### Qué queda
+
+- Publicar esta versión en Render y hacer la prueba manual del aviso por Telegram.

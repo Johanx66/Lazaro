@@ -110,8 +110,8 @@ export class TransferToHumanUseCase {
 
     const messageToCustomer =
       assignedAgentId !== null
-        ? "Un agente te atenderá en breve."
-        : "Todos los agentes están ocupados. Tu solicitud está en cola y te atenderán en orden de llegada.";
+        ? "Tu conversación fue transferida a un asesor. Te responderá por este chat en cuanto esté disponible."
+        : "Tu conversación fue transferida a un asesor. Te responderá por este chat en cuanto esté disponible. Tu solicitud está en cola y será atendida en orden de llegada.";
 
     const finalConversation = await this.conversationRepository.findById(input.conversationId);
     return {

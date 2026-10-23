@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { ProcessIncomingMessageUseCase } from "./process-incoming-message.js";
+import { HandleInboundMessageUseCase } from "./handle-inbound-message.js";
 import type { Conversation, ConversationStatus, Message } from "../../modules/conversations/domain/entities/conversation.js";
 import type { InboundConversationPorts } from "./process-incoming-message.js";
 
-const waitMessage = "⏳ Ya te conectamos con un asesor 👨‍💼. También puedes volver al menú 🔙";
+const waitMessage = "Tu conversación fue transferida a un asesor. Te responderá por este chat en cuanto esté disponible.";
 const reminder = "⏳ Seguimos buscando a un asesor. Escribe «menú» o pulsa 🔙 Volver al menú para elegir otra opción.";
 
 function setup(initialStatus: ConversationStatus, ticketCreatedAt = new Date(), agentHasReplied = false) {
@@ -72,6 +73,31 @@ describe("ciclo de transferencia a asesor", () => {
     expect(result.status).toBe("WAITING_AGENT");
   });
 
+  it.each(["WEB", "WHATSAPP", "TELEGRAM"] as const)(
+    "envía el aviso por %s antes del primer mensaje del asesor",
+    async (channel) => {
+      const { useCase } = setup("BOT_HANDLING");
+      const send = vi.fn(async (_contactId: string, _message: { text: string; sender: "BOT" | "AGENT" }) => undefined);
+      const handleInbound = new HandleInboundMessageUseCase({
+        processor: useCase,
+        adapter: { channel, send } as never,
+      });
+
+      await handleInbound.execute({
+        channel,
+        contactId: "570000000001",
+        name: "Ana",
+        text: "hablar con un agente",
+      });
+      await send("570000000001", { text: "Hola, soy Ana, tu asesora.", sender: "AGENT" });
+
+      expect(send.mock.calls.map(([, message]) => message)).toEqual([
+        { text: waitMessage, sender: "BOT" },
+        { text: "Hola, soy Ana, tu asesora.", sender: "AGENT" },
+      ]);
+    },
+  );
+
   it("volver al menú cancela la transferencia y muestra el menú", async () => {
     const { conversation, useCase } = setup("WAITING_AGENT");
     const result = await useCase.execute(input("volver"));
@@ -85,6 +111,7 @@ describe("ciclo de transferencia a asesor", () => {
     const first = await useCase.execute(input("¿hay novedades?"));
     const second = await useCase.execute(input("sigo esperando"));
     expect(first.reply).toBe(reminder);
+    expect(first.reply).not.toBe(waitMessage);
     expect(second.reply).toBeNull();
     expect(transfer).not.toHaveBeenCalled();
   });
@@ -108,4 +135,3 @@ describe("ciclo de transferencia a asesor", () => {
     expect(result.status).toBe("OPEN");
   });
 });
-
