@@ -16,6 +16,15 @@ const firstDatasetSchema = z.object({
   registros: z.array(firstRecordSchema),
 });
 
+// El segundo dataset no usa booleanos sino niveles (ver
+// configuracion.niveles_agente_humano en el JSON): "no" y "opcional" los atiende el
+// bot (en "opcional" además ofrece transferir); solo "obligatorio" exige un asesor.
+const humanAgentLevelSchema = z
+  .union([z.boolean(), z.enum(["no", "opcional", "obligatorio"])])
+  .optional()
+  .default(false)
+  .transform((value) => value === true || value === "obligatorio");
+
 const secondRecordSchema = z.object({
   id: z.string().min(1),
   categoria: categorySchema,
@@ -23,7 +32,7 @@ const secondRecordSchema = z.object({
   variaciones: z.array(z.string()),
   palabras_clave: z.array(z.string()),
   respuesta: z.string().min(1),
-  requiere_agente_humano: z.boolean().optional().default(false),
+  requiere_agente_humano: humanAgentLevelSchema,
 });
 
 const secondDatasetSchema = z.object({

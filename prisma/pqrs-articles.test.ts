@@ -76,4 +76,52 @@ describe("mapPqrsDatasets", () => {
 
     expect(result.map((article) => article.active)).toEqual([false, false]);
   });
+
+  it("acepta los niveles de agente del segundo dataset: solo 'obligatorio' desactiva", () => {
+    const entry = (id: string, level: unknown) => ({
+      id,
+      categoria: "queja",
+      pregunta_principal: `Pregunta ${id}`,
+      variaciones: [],
+      palabras_clave: [],
+      respuesta: "Respuesta de ejemplo.",
+      requiere_agente_humano: level,
+    });
+
+    const result = mapPqrsDatasets(
+      { registros: [] },
+      {
+        entradas: [
+          entry("N1", "no"),
+          entry("N2", "opcional"),
+          entry("N3", "obligatorio"),
+          entry("N4", false),
+          entry("N5", true),
+        ],
+      },
+    );
+
+    expect(result.map((article) => article.active)).toEqual([true, true, false, true, false]);
+  });
+
+  it("rechaza un nivel de agente desconocido", () => {
+    expect(() =>
+      mapPqrsDatasets(
+        { registros: [] },
+        {
+          entradas: [
+            {
+              id: "N6",
+              categoria: "queja",
+              pregunta_principal: "Pregunta N6",
+              variaciones: [],
+              palabras_clave: [],
+              respuesta: "Respuesta de ejemplo.",
+              requiere_agente_humano: "a veces",
+            },
+          ],
+        },
+      ),
+    ).toThrow();
+  });
 });
