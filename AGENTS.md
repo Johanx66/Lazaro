@@ -7,7 +7,7 @@ Lee también `PLAN.md`: allí están las fases y cuál es la ACTUAL.
 ## 1. Forma de trabajo
 
 - Trabaja SOLO la fase marcada como ACTUAL en `PLAN.md`. No empieces otra sin que
-  yo lo confirme.
+  yo lo confirme. Si ninguna está marcada como ACTUAL, pregúntame cuál sigue.
 - Antes de cambiar código, léelo y respeta su estilo.
 - Cambios pequeños y verificables. Si algo del plan no encaja con el código, avísame
   en vez de improvisar. Si necesitas una decisión mía, haz UNA pregunta y espera.
@@ -16,14 +16,17 @@ Lee también `PLAN.md`: allí están las fases y cuál es la ACTUAL.
 - No debilites, borres ni saltes tests existentes para que pasen. No toques
   `tsconfig*.json` sin avisarme.
 - Al cerrar una fase, actualiza `AUDIT.md` (qué se hizo, qué queda, cómo probarlo) y
-  marca la fase en `PLAN.md`.
+  marca la fase en `PLAN.md`. Ambos se mantienen cortos: se reemplaza el estado, no se
+  acumula historial (el historial queda en git). En `AUDIT.md` va el resumen del
+  resultado (fecha y número de tests), no la salida completa.
 
 ## 2. Presupuesto (tengo poco saldo de API)
 
 - Si el mismo error persiste tras 3 intentos de corrección, detente y explícame el
   problema en vez de seguir intentando.
 - No leas completos archivos grandes ni carpetas generadas: `node_modules/`,
-  `dist/`, `.pglite-data/`, `src/generated/`, `*.log`, `package-lock.json`.
+  `dist/`, `.pglite-data/`, `src/generated/`, `*.log`, `package-lock.json`,
+  `prisma/data/` (JSON de más de 500 KB cada uno).
 - Prefiere leer solo los archivos necesarios para la tarea.
 
 ## 3. Código
@@ -75,7 +78,7 @@ Lee también `PLAN.md`: allí están las fases y cuál es la ACTUAL.
 ## 6. Canales
 
 - El núcleo no depende de WhatsApp: todo pasa por el puerto `ChannelAdapter`
-  (`WebChatAdapter` y `WhatsAppAdapter`).
+  (`WebChatAdapter`, `WhatsAppAdapter` y `TelegramAdapter`).
 - El outbox del chat web es un detalle interno de `WebChatAdapter`; ningún otro
   módulo lo importa. Todo envío pasa por `adapter.send`.
 - El teléfono o identificador del canal NUNCA autoriza acceso a datos; solo
@@ -97,7 +100,7 @@ Lee también `PLAN.md`: allí están las fases y cuál es la ACTUAL.
 3. Salida literal de `npm run typecheck` y `npm test`.
 4. Qué queda pendiente o qué decisión necesitas de mí.
 
-
+## 9. Alcance de cada tarea
 
 - Haz únicamente lo que pide la tarea. No refactorices, no renombres ni cambies
   archivos que no se mencionen; si ves algo mejorable, solo avísame.
